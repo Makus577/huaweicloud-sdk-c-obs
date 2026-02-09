@@ -467,60 +467,73 @@ obs_status setup_CA(http_request *request,
         curl_easy_setopt_safe(CURLOPT_SSL_CTX_DATA, (void *)params->bucketContext.certificate_info);
         curl_easy_setopt_safe(CURLOPT_SSL_CTX_FUNCTION, *sslctx_function);
     }
-    if (params->request_option.server_cert_path)
-    {
+    // 基础SSL验证配置
+    curl_easy_setopt_safe(CURLOPT_SSL_VERIFYPEER, 1);
+    curl_easy_setopt_safe(CURLOPT_SSL_VERIFYHOST, 2);  // 严格验证主机名
+
+    // CA证书配置
+    if (params->bucketContext.certificate_info) {
+        curl_easy_setopt_safe(CURLOPT_SSL_CTX_DATA, (void *)params->bucketContext.certificate_info);
+        curl_easy_setopt_safe(CURLOPT_SSL_CTX_FUNCTION, *sslctx_function);
+    }
+    if (params->request_option.server_cert_path) {
         curl_easy_setopt_safe(CURLOPT_CAINFO, params->request_option.server_cert_path);
+        COMMLOG(OBS_LOGINFO, "%s CA certificate path: %s", __FUNCTION__, params->request_option.server_cert_path);
     }
 
-    // 双向证书认证配置
-    if (params->request_option.mutual_ssl_switch == OBS_MUTUAL_SSL_OPEN)
-    {
-        if (params->request_option.client_cert_path)
-        {
-            curl_easy_setopt_safe(CURLOPT_SSLCERT, params->request_option.client_cert_path);
+    // 双向认证配置
+    if (params->request_option.mutual_ssl_switch == OBS_MUTUAL_SSL_OPEN) {
+        if (!params->request_option.client_cert_path || !params->request_option.client_key_path) {
+            COMMLOG(OBS_LOGERROR, "%s Mutual SSL enabled but client certificate or key not provided", __FUNCTION__);
+            return OBS_STATUS_InvalidParameter;
         }
 
-        if (params->request_option.client_key_path)
-        {
-            curl_easy_setopt_safe(CURLOPT_SSLKEY, params->request_option.client_key_path);
+        status = curl_easy_setopt(request->curl, CURLOPT_SSLCERT, params->request_option.client_cert_path);
+        if (status != CURLE_OK) {
+            COMMLOG(OBS_LOGERROR, "%s Failed to set client cert: %s", __FUNCTION__, curl_easy_strerror(status));
+            return OBS_STATUS_InternalError;
+        }
+        COMMLOG(OBS_LOGINFO, "%s Client certificate path: %s", __FUNCTION__, params->request_option.client_cert_path);
 
-            if (params->request_option.client_key_password)
-            {
-                curl_easy_setopt_safe(CURLOPT_KEYPASSWD, params->request_option.client_key_password);
+        status = curl_easy_setopt(request->curl, CURLOPT_SSLKEY, params->request_option.client_key_path);
+        if (status != CURLE_OK) {
+            COMMLOG(OBS_LOGERROR, "%s Failed to set client key: %s", __FUNCTION__, curl_easy_strerror(status));
+            return OBS_STATUS_InternalError;
+        }
+        COMMLOG(OBS_LOGINFO, "%s Client key path: %s", __FUNCTION__, params->request_option.client_key_path);
+
+        if (params->request_option.client_key_password) {
+            status = curl_easy_setopt(request->curl, CURLOPT_KEYPASSWD, params->request_option.client_key_password);
+            if (status != CURLE_OK) {
+                COMMLOG(OBS_LOGERROR, "%s Failed to set client key password: %s", __FUNCTION__, curl_easy_strerror(status));
+                return OBS_STATUS_InternalError;
             }
+            COMMLOG(OBS_LOGINFO, "%s Client key password provided", __FUNCTION__);
         }
 
         COMMLOG(OBS_LOGINFO, "%s Mutual SSL authentication enabled", __FUNCTION__);
     }
 
-    // SSL套件和算法配置：支持国密和标准TLS两种模式
-    if (params->request_option.gm_mode_switch == OBS_GM_MODE_OPEN)
-    {
-        // 国密模式
+    // SSL套件和版本配置
+    if (params->request_option.gm_mode_switch == OBS_GM_MODE_OPEN) {
         const char *gm_cipher_default = "ECDHE-SM2-WITH-SM4-SM3:ECDHE-SM2-WITH-SM4-GCM-SM3";
         const char *cipher_list = params->request_option.ssl_cipher_list ?
                                   params->request_option.ssl_cipher_list : gm_cipher_default;
 
         status = curl_easy_setopt(request->curl, CURLOPT_SSL_CIPHER_LIST, cipher_list);
         if (status != CURLE_OK) {
-            COMMLOG(OBS_LOGWARN, "%s Set SSL cipher list failed, error: %s",
-                     __FUNCTION__, curl_easy_strerror(status));
-        } else {
-            COMMLOG(OBS_LOGINFO, "%s GM SSL cipher list: %s", __FUNCTION__, cipher_list);
+            COMMLOG(OBS_LOGERROR, "%s Failed to set GM cipher list: %s", __FUNCTION__, curl_easy_strerror(status));
+            return OBS_STATUS_InternalError;
         }
 
-        // 国密模式使用TLSv1.2（Tongsuo兼容）
         status = curl_easy_setopt(request->curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
         if (status != CURLE_OK) {
-            COMMLOG(OBS_LOGWARN, "%s Set SSL version failed, error: %s",
-                     __FUNCTION__, curl_easy_strerror(status));
-        } else {
-            COMMLOG(OBS_LOGINFO, "%s GM SSL version set to TLSv1.2", __FUNCTION__);
+            COMMLOG(OBS_LOGERROR, "%s Failed to set GM SSL version: %s", __FUNCTION__, curl_easy_strerror(status));
+            return OBS_STATUS_InternalError;
         }
-    }
-    else
-    {
-        // 标准TLS模式
+
+        COMMLOG(OBS_LOGINFO, "%s GM mode enabled with cipher: %s", __FUNCTION__, cipher_list);
+    } else {
         const char *std_cipher_default = "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:"
                                          "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256";
         const char *cipher_list = params->request_option.ssl_cipher_list ?
@@ -528,32 +541,99 @@ obs_status setup_CA(http_request *request,
 
         status = curl_easy_setopt(request->curl, CURLOPT_SSL_CIPHER_LIST, cipher_list);
         if (status != CURLE_OK) {
-            COMMLOG(OBS_LOGWARN, "%s Set SSL cipher list failed, error: %s",
-                     __FUNCTION__, curl_easy_strerror(status));
-        } else {
-            COMMLOG(OBS_LOGINFO, "%s Standard TLS cipher list: %s", __FUNCTION__, cipher_list);
+            COMMLOG(OBS_LOGERROR, "%s Failed to set standard cipher list: %s", __FUNCTION__, curl_easy_strerror(status));
+            return OBS_STATUS_InternalError;
         }
 
-        // 设置SSL版本范围
-        long min_ver = params->request_option.ssl_min_version ?
-                           params->request_option.ssl_min_version : CURL_SSLVERSION_TLSv1_2;
-        long max_ver = params->request_option.ssl_max_version ?
-                           params->request_option.ssl_max_version : ((1 << 16) | 3);
+        // 优化SSL版本兼容性处理
+        long min_ver = params->request_option.ssl_min_version ? params->request_option.ssl_min_version : CURL_SSLVERSION_TLSv1_2;
+        long max_ver = params->request_option.ssl_max_version ? params->request_option.ssl_max_version : ((1 << 16) | 3); // TLSv1.3
+
+        // 确保SSL版本范围的合理性
+        if (min_ver > max_ver) {
+            COMMLOG(OBS_LOGWARN, "%s SSL min version (%ld) is greater than max version (%ld), using default values", __FUNCTION__, min_ver, max_ver);
+            min_ver = CURL_SSLVERSION_TLSv1_2;
+            max_ver = ((1 << 16) | 3); // TLSv1.3
+        }
+
+        // 检查SSL版本是否在支持的范围内
+        if (min_ver < CURL_SSLVERSION_TLSv1_0 || max_ver > ((1 << 16) | 3)) {
+            COMMLOG(OBS_LOGWARN, "%s SSL version range [%ld, %ld] is outside supported range, using default values", __FUNCTION__, min_ver, max_ver);
+            min_ver = CURL_SSLVERSION_TLSv1_2;
+            max_ver = ((1 << 16) | 3); // TLSv1.3
+        }
 
         status = curl_easy_setopt(request->curl, CURLOPT_SSLVERSION, min_ver);
         if (status != CURLE_OK) {
-            COMMLOG(OBS_LOGWARN, "%s Set SSL min version failed, error: %s",
-                     __FUNCTION__, curl_easy_strerror(status));
-        } else {
-            COMMLOG(OBS_LOGINFO, "%s SSL min version set to %ld", __FUNCTION__, min_ver);
+            COMMLOG(OBS_LOGERROR, "%s Failed to set SSL min version: %s", __FUNCTION__, curl_easy_strerror(status));
+            return OBS_STATUS_InternalError;
         }
 
         status = curl_easy_setopt(request->curl, CURLOPT_SSLVERSION_MAX, max_ver);
         if (status != CURLE_OK) {
-            COMMLOG(OBS_LOGWARN, "%s Set SSL max version failed, error: %s",
-                     __FUNCTION__, curl_easy_strerror(status));
+            COMMLOG(OBS_LOGERROR, "%s Failed to set SSL max version: %s", __FUNCTION__, curl_easy_strerror(status));
+            return OBS_STATUS_InternalError;
+        }
+
+        // 记录SSL版本信息
+        char ssl_ver_str[64] = {0};
+        if (min_ver == max_ver) {
+            switch (min_ver) {
+                case CURL_SSLVERSION_TLSv1_0:
+                    strcpy_s(ssl_ver_str, sizeof(ssl_ver_str), "TLSv1.0");
+                    break;
+                case CURL_SSLVERSION_TLSv1_1:
+                    strcpy_s(ssl_ver_str, sizeof(ssl_ver_str), "TLSv1.1");
+                    break;
+                case CURL_SSLVERSION_TLSv1_2:
+                    strcpy_s(ssl_ver_str, sizeof(ssl_ver_str), "TLSv1.2");
+                    break;
+                case (1 << 16) | 3:
+                    strcpy_s(ssl_ver_str, sizeof(ssl_ver_str), "TLSv1.3");
+                    break;
+                default:
+                    sprintf_s(ssl_ver_str, sizeof(ssl_ver_str), "Unknown version (%ld)", min_ver);
+            }
+            COMMLOG(OBS_LOGINFO, "%s Standard TLS mode enabled with version: %s", __FUNCTION__, ssl_ver_str);
         } else {
-            COMMLOG(OBS_LOGINFO, "%s SSL max version set to %ld", __FUNCTION__, max_ver);
+            char min_ver_str[32] = {0};
+            char max_ver_str[32] = {0};
+
+            switch (min_ver) {
+                case CURL_SSLVERSION_TLSv1_0:
+                    strcpy_s(min_ver_str, sizeof(min_ver_str), "TLSv1.0");
+                    break;
+                case CURL_SSLVERSION_TLSv1_1:
+                    strcpy_s(min_ver_str, sizeof(min_ver_str), "TLSv1.1");
+                    break;
+                case CURL_SSLVERSION_TLSv1_2:
+                    strcpy_s(min_ver_str, sizeof(min_ver_str), "TLSv1.2");
+                    break;
+                case (1 << 16) | 3:
+                    strcpy_s(min_ver_str, sizeof(min_ver_str), "TLSv1.3");
+                    break;
+                default:
+                    sprintf_s(min_ver_str, sizeof(min_ver_str), "Unknown (%ld)", min_ver);
+            }
+
+            switch (max_ver) {
+                case CURL_SSLVERSION_TLSv1_0:
+                    strcpy_s(max_ver_str, sizeof(max_ver_str), "TLSv1.0");
+                    break;
+                case CURL_SSLVERSION_TLSv1_1:
+                    strcpy_s(max_ver_str, sizeof(max_ver_str), "TLSv1.1");
+                    break;
+                case CURL_SSLVERSION_TLSv1_2:
+                    strcpy_s(max_ver_str, sizeof(max_ver_str), "TLSv1.2");
+                    break;
+                case (1 << 16) | 3:
+                    strcpy_s(max_ver_str, sizeof(max_ver_str), "TLSv1.3");
+                    break;
+                default:
+                    sprintf_s(max_ver_str, sizeof(max_ver_str), "Unknown (%ld)", max_ver);
+            }
+
+            COMMLOG(OBS_LOGINFO, "%s Standard TLS mode enabled with version range: %s to %s", __FUNCTION__, min_ver_str, max_ver_str);
         }
     }
 

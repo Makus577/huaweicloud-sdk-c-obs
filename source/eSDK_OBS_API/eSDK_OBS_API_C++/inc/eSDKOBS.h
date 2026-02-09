@@ -1109,36 +1109,68 @@ typedef enum
     OBS_GM_MODE_OPEN = 1     // 国密模式（支持SM2/SM3/SM4）
 } obs_gm_mode_switch;
 
+/**
+ * HTTP请求配置选项结构体
+ *
+ * 包含HTTP请求的所有配置选项，包括连接超时、代理设置、SSL配置等
+ * 用于配置OBS SDK的网络请求行为
+ */
 typedef struct obs_http_request_option
 {
-    int speed_limit;
-    int speed_time;
-    int connect_time;
-    int max_connected_time;
-    bool keep_alive;
-    int keep_idle;
-    int keep_intvl;
-    char *proxy_host;
-    char *proxy_auth;
-    char *ssl_cipher_list;
-    bool forbid_reuse_tcp;
-    long curl_max_connects;
-    obs_http2_switch http2_switch;
-    obs_bbr_switch   bbr_switch;
-	obs_auth_switch  auth_switch;
-    long buffer_size;
-    char* server_cert_path;
-	bool curl_log_verbose;
+    int speed_limit;                     // 速度限制（字节/秒）
+    int speed_time;                      // 速度测量时间间隔（秒）
+    int connect_time;                    // 连接超时时间（秒）
+    int max_connected_time;              // 最大连接时间（秒）
+    bool keep_alive;                     // 是否保持连接
+    int keep_idle;                       // TCP保持连接的空闲时间（秒）
+    int keep_intvl;                      // TCP保持连接的间隔时间（秒）
+    char *proxy_host;                    // 代理服务器地址
+    char *proxy_auth;                    // 代理服务器认证信息（格式：user:password）
+    char *ssl_cipher_list;               // SSL密码套件列表（格式："ECDHE-SM2-WITH-SM4-SM3:ECDHE-SM2-WITH-SM4-GCM-SM3"）
+    bool forbid_reuse_tcp;               // 是否禁止重用TCP连接
+    long curl_max_connects;              // CURL最大连接数
+    obs_http2_switch http2_switch;       // HTTP/2开关
+    obs_bbr_switch   bbr_switch;         // BBR算法开关
+	obs_auth_switch  auth_switch;        // 认证类型开关
+    long buffer_size;                    // 缓冲区大小（字节）
+    char* server_cert_path;              // 服务器证书路径（PEM格式）
+	bool curl_log_verbose;               // 是否启用详细的CURL日志
+
     // 双向证书认证配置
-    obs_mutual_ssl_switch mutual_ssl_switch;
-    char* client_cert_path;
-    char* client_key_path;
-    char* client_key_password;
+    obs_mutual_ssl_switch mutual_ssl_switch;  // 双向证书认证开关（OBS_MUTUAL_SSL_OPEN/OBS_MUTUAL_SSL_CLOSE）
+    char* client_cert_path;                  // 客户端证书路径（PEM格式）
+    char* client_key_path;                   // 客户端私钥路径（PEM格式）
+    char* client_key_password;               // 客户端私钥密码（可选，NULL表示无密码）
+
     // SSL配置
-    obs_gm_mode_switch gm_mode_switch;   // 国密模式开关
-    long ssl_min_version;                // SSL最小版本（可选，默认TLSv1.2）
-    long ssl_max_version;                // SSL最大版本（可选，默认TLSv1.3）
+    obs_gm_mode_switch gm_mode_switch;         // 国密模式开关（OBS_GM_MODE_OPEN/OBS_GM_MODE_CLOSE）
+    long ssl_min_version;                      // SSL最小版本（可选，默认TLSv1.2）
+    long ssl_max_version;                      // SSL最大版本（可选，默认TLSv1.3）
 } obs_http_request_option;
+
+/**
+ * 初始化HTTP请求配置选项
+ *
+ * 初始化obs_http_request_option结构体，设置默认值
+ *
+ * @param options 指向obs_http_request_option结构体的指针
+ *
+ * 示例：
+ * obs_http_request_option request_options;
+ * init_http_request_option(&request_options);
+ *
+ * 配置双向认证示例：
+ * request_options.mutual_ssl_switch = OBS_MUTUAL_SSL_OPEN;
+ * request_options.client_cert_path = "/path/to/client.crt";
+ * request_options.client_key_path = "/path/to/client.key";
+ * request_options.client_key_password = "password";
+ *
+ * 配置国密模式示例：
+ * request_options.gm_mode_switch = OBS_GM_MODE_OPEN;
+ * request_options.ssl_min_version = CURL_SSLVERSION_TLSv1_2;
+ * request_options.ssl_max_version = CURL_SSLVERSION_TLSv1_2;
+ */
+void init_http_request_option(obs_http_request_option *options);
 
 typedef struct temp_auth_configure
 {

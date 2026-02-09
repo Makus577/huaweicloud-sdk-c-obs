@@ -230,6 +230,10 @@ obs_status obs_initialize(int win32_flags)
 
 void init_obs_options(obs_options *options)
 {
+    // 初始化HTTP请求配置选项
+    init_http_request_option(&options->request_options);
+
+    // 覆盖一些特定的默认值
     options->request_options.speed_time = DEFAULT_LOW_SPEED_TIME_S;
     options->request_options.max_connected_time = DEFAULT_TIMEOUT_S;
     options->request_options.connect_time = DEFAULT_CONNECTTIMEOUT_MS;
@@ -237,26 +241,8 @@ void init_obs_options(obs_options *options)
     options->request_options.keep_alive = false;
     options->request_options.keep_idle = DEFAULT_TCP_KEEPIDLE;
     options->request_options.keep_intvl = DEFAULT_TCP_KEEPINVTL;
-    options->request_options.proxy_auth = NULL;
-    options->request_options.proxy_host = NULL;
-    options->request_options.ssl_cipher_list = NULL;
-    options->request_options.http2_switch = OBS_HTTP2_CLOSE;
-    options->request_options.bbr_switch = OBS_BBR_CLOSE;
-	options->request_options.auth_switch = OBS_NEGOTIATION_TYPE;
     options->request_options.buffer_size = 16 * 1024L;
-    options->request_options.server_cert_path = NULL;
-	options->request_options.curl_log_verbose = false;
-    options->request_options.forbid_reuse_tcp = false;
     options->request_options.curl_max_connects = DEFAULT_MAXCONNECTS;
-    options->request_options.mutual_ssl_switch = OBS_MUTUAL_SSL_CLOSE;
-    options->request_options.client_cert_path = NULL;
-    options->request_options.client_key_path = NULL;
-    options->request_options.client_key_password = NULL;
-
-    // SSL配置初始化（国密模式）
-    options->request_options.gm_mode_switch = OBS_GM_MODE_CLOSE;
-    options->request_options.ssl_min_version = CURL_SSLVERSION_TLSv1_2;
-    options->request_options.ssl_max_version = (1 << 16) | 3;  // CURL_SSLVERSION_TLSv1_3
 
     options->bucket_options.access_key = NULL;
     options->bucket_options.secret_access_key =NULL;

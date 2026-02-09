@@ -17,6 +17,9 @@
 
 #include "eSDKOBS.h"
 
+// 初始化HTTP请求配置选项
+void init_http_request_option(obs_http_request_option *options);
+
 // 从配置文件加载 SSL 配置
 void load_ssl_config_from_ini(obs_options *options);
 
