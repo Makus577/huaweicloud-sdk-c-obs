@@ -4,7 +4,11 @@
  *
  * 该模块提供统一的国密算法接口，支持自动检测Tongsuo/OpenSSL版本并选择相应的算法实现。
  * 主要支持SM2、SM3和SM4算法，并提供硬件加速支持。
+ *
+ * 该模块仅在OBS_ENABLE_GM_SUPPORT=1时编译。
  */
+#if OBS_ENABLE_GM_SUPPORT
+
 #include "obs_sm_crypto.h"
 #include "log.h"
 #include <openssl/ssl.h>
@@ -854,3 +858,5 @@ int obs_sm2_verify(const char *public_key, const unsigned char *data, int data_l
 
     return -1;
 }
+
+#endif /* OBS_ENABLE_GM_SUPPORT */

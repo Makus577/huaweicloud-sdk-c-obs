@@ -1102,12 +1102,19 @@ typedef enum
     OBS_MUTUAL_SSL_OPEN = 1
 } obs_mutual_ssl_switch;
 
-// 国密模式枚举
+// 国密功能编译开关（默认禁用）
+#ifndef OBS_ENABLE_GM_SUPPORT
+#define OBS_ENABLE_GM_SUPPORT 0
+#endif
+
+// 国密模式枚举（仅在OBS_ENABLE_GM_SUPPORT=1时有效）
+#if OBS_ENABLE_GM_SUPPORT
 typedef enum
 {
     OBS_GM_MODE_CLOSE = 0,  // 非国密模式（标准TLS）
     OBS_GM_MODE_OPEN = 1     // 国密模式（支持SM2/SM3/SM4）
 } obs_gm_mode_switch;
+#endif
 
 /**
  * HTTP请求配置选项结构体
@@ -1136,16 +1143,20 @@ typedef struct obs_http_request_option
     char* server_cert_path;              // 服务器证书路径（PEM格式）
 	bool curl_log_verbose;               // 是否启用详细的CURL日志
 
-    // 双向证书认证配置
+    // 双向证书认证配置（所有场景支持）
     obs_mutual_ssl_switch mutual_ssl_switch;  // 双向证书认证开关（OBS_MUTUAL_SSL_OPEN/OBS_MUTUAL_SSL_CLOSE）
     char* client_cert_path;                  // 客户端证书路径（PEM格式）
     char* client_key_path;                   // 客户端私钥路径（PEM格式）
     char* client_key_password;               // 客户端私钥密码（可选，NULL表示无密码）
 
     // SSL配置
-    obs_gm_mode_switch gm_mode_switch;         // 国密模式开关（OBS_GM_MODE_OPEN/OBS_GM_MODE_CLOSE）
     long ssl_min_version;                      // SSL最小版本（可选，默认TLSv1.2）
     long ssl_max_version;                      // SSL最大版本（可选，默认TLSv1.3）
+
+    // 国密相关配置（仅在OBS_ENABLE_GM_SUPPORT=1时有效）
+    #if OBS_ENABLE_GM_SUPPORT
+    obs_gm_mode_switch gm_mode_switch;         // 国密模式开关（OBS_GM_MODE_OPEN/OBS_GM_MODE_CLOSE）
+    #endif
 
     // 高级SSL功能
     bool ocsp_stapling;                      // 是否启用OCSP stapling（默认禁用）
@@ -1167,16 +1178,18 @@ typedef struct obs_http_request_option
  * obs_http_request_option request_options;
  * init_http_request_option(&request_options);
  *
- * 配置双向认证示例：
+ * 配置双向认证示例（所有场景支持）：
  * request_options.mutual_ssl_switch = OBS_MUTUAL_SSL_OPEN;
  * request_options.client_cert_path = "/path/to/client.crt";
  * request_options.client_key_path = "/path/to/client.key";
  * request_options.client_key_password = "password";
  *
- * 配置国密模式示例：
+ * 配置国密模式示例（仅OBS_ENABLE_GM_SUPPORT=1时有效）：
+ * #if OBS_ENABLE_GM_SUPPORT
  * request_options.gm_mode_switch = OBS_GM_MODE_OPEN;
  * request_options.ssl_min_version = CURL_SSLVERSION_TLSv1_2;
  * request_options.ssl_max_version = CURL_SSLVERSION_TLSv1_2;
+ * #endif
  */
 void init_http_request_option(obs_http_request_option *options);
 

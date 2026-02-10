@@ -73,7 +73,9 @@ static const char *config_item_names[] = {
     "client_cert_path",
     "client_key_path",
     "client_key_password",
+    #if OBS_ENABLE_GM_SUPPORT
     "gm_mode_switch",
+    #endif
     "ssl_min_version",
     "ssl_max_version",
     "ocsp_stapling",
@@ -196,9 +198,11 @@ static int config_set_internal(obs_config_item_t item, const char *value, config
             }
             g_config_context.config.client_key_password = strdup(value);
             break;
+        #if OBS_ENABLE_GM_SUPPORT
         case OBS_CONFIG_GM_MODE_SWITCH:
             g_config_context.config.gm_mode_switch = atoi(value);
             break;
+        #endif
         case OBS_CONFIG_SSL_MIN_VERSION: {
             long ssl_version;
             char temp_value[16] = {0};

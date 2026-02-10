@@ -25,6 +25,15 @@ if(NOT CMAKE_HOST_WIN32)
 endif()
 
 option(USE_CUSTOM "option for custom library path" OFF)
+option(OBS_ENABLE_GM_SUPPORT "Enable GM algorithm support" OFF)
+
+if(OBS_ENABLE_GM_SUPPORT)
+    add_definitions(-DOBS_ENABLE_GM_SUPPORT=1)
+    message(STATUS "GM algorithm support enabled")
+else()
+    add_definitions(-DOBS_ENABLE_GM_SUPPORT=0)
+    message(STATUS "GM algorithm support disabled")
+endif()
 set(SECUREC_INC_DIR ${PROJECT_SOURCE_DIR}/platform/libboundscheck/include)
 set(CURL_VERSION curl-8.11.1)
 set(TONGSUO_VERSION tongsuo-8.3.0)
@@ -201,10 +210,28 @@ link_directories(${ESDK_LOG_LIB_DIR})
 link_directories(${SPDLOG_LIB_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/source/eSDK_OBS_API/eSDK_OBS_API_C++/inc)
 include_directories(${CMAKE_SOURCE_DIR}/source/eSDK_OBS_API/eSDK_OBS_API_C++/include)
+# 公共源文件
 aux_source_directory(${CMAKE_SOURCE_DIR}/source/eSDK_OBS_API/eSDK_OBS_API_C++/src SOURCE_DIR)
 aux_source_directory(${CMAKE_SOURCE_DIR}/source/eSDK_OBS_API/eSDK_OBS_API_C++/src/bucket BUCKET_SOURCE_DIR)
 aux_source_directory(${CMAKE_SOURCE_DIR}/source/eSDK_OBS_API/eSDK_OBS_API_C++/src/object OBJECT_SOURCE_DIR)
-add_library(eSDKOBS SHARED ${SOURCE_DIR} ${BUCKET_SOURCE_DIR} ${OBJECT_SOURCE_DIR})
+
+# 国密功能源文件（仅在OBS_ENABLE_GM_SUPPORT=1时编译）
+set(GM_SOURCE_FILES
+    ${CMAKE_SOURCE_DIR}/source/eSDK_OBS_API/eSDK_OBS_API_C++/src/obs_sm_crypto.c
+    ${CMAKE_SOURCE_DIR}/source/eSDK_OBS_API/eSDK_OBS_API_C++/src/ssl_gm_config.c
+)
+
+if(NOT OBS_ENABLE_GM_SUPPORT)
+    # 从源文件列表中移除国密功能相关文件
+    list(REMOVE_ITEM SOURCE_DIR ${GM_SOURCE_FILES})
+    message(STATUS "GM source files removed from compilation")
+endif()
+# 添加库目标
+if(OBS_ENABLE_GM_SUPPORT)
+    add_library(eSDKOBS SHARED ${SOURCE_DIR} ${BUCKET_SOURCE_DIR} ${OBJECT_SOURCE_DIR} ${GM_SOURCE_FILES})
+else()
+    add_library(eSDKOBS SHARED ${SOURCE_DIR} ${BUCKET_SOURCE_DIR} ${OBJECT_SOURCE_DIR})
+endif()
 target_link_libraries(eSDKOBS curl ssl xml2 pcre iconv cjson boundscheck eSDKLogAPI spdlog)
 
 #***********************************************************************

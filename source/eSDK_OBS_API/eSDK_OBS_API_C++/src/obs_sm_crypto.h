@@ -4,11 +4,15 @@
  *
  * 该模块提供统一的国密算法接口，支持自动检测Tongsuo/OpenSSL版本并选择相应的算法实现。
  * 主要支持SM2、SM3和SM4算法，并提供硬件加速支持。
+ *
+ * 该模块仅在OBS_ENABLE_GM_SUPPORT=1时编译和暴露接口。
  */
 #ifndef OBS_SM_CRYPTO_H
 #define OBS_SM_CRYPTO_H
 
 #include "eSDKOBS.h"
+
+#if OBS_ENABLE_GM_SUPPORT
 
 #ifdef __cplusplus
 extern "C" {
@@ -227,5 +231,29 @@ int obs_sm_crypto_get_support_info(char *buffer, int buffer_size);
 #ifdef __cplusplus
 }
 #endif
+
+#else  // OBS_ENABLE_GM_SUPPORT
+
+// 当国密功能禁用时，提供空的接口声明，以便代码编译通过
+
+#define obs_sm_crypto_init(...) 0
+#define obs_sm_crypto_get_version(...) 0
+#define obs_sm2_sign(...) -1
+#define obs_sm2_verify(...) -1
+#define obs_sm3_hash(...) -1
+#define obs_sm4_encrypt(...) -1
+#define obs_sm4_decrypt(...) -1
+#define obs_sm_crypto_supports_sm2(...) 0
+#define obs_sm_crypto_supports_sm3(...) 0
+#define obs_sm_crypto_supports_sm4(...) 0
+#define obs_sm_crypto_detect_acceleration(...) SM_CRYPTO_ACCELERATION_NONE
+#define obs_sm_crypto_supports_acceleration(...) 0
+#define obs_sm_crypto_set_implementation(...) -1
+#define obs_sm_crypto_get_implementation(...) SM_CRYPTO_IMPLEMENTATION_SOFTWARE
+#define obs_sm_crypto_get_performance_stats(...) -1
+#define obs_sm_crypto_reset_performance_stats(...) -1
+#define obs_sm_crypto_get_support_info(...) -1
+
+#endif /* OBS_ENABLE_GM_SUPPORT */
 
 #endif /* OBS_SM_CRYPTO_H */
