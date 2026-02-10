@@ -70,17 +70,29 @@ int obs_sm_crypto_get_version(void)
 int obs_sm_crypto_supports_sm2(void)
 {
     // 检测是否支持SM2算法
-    EVP_MD_CTX *md_ctx = EVP_MD_CTX_create();
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    EVP_MD_CTX md_ctx;
+    EVP_MD_CTX_init(&md_ctx);
+    const EVP_MD *md = EVP_sm3();
+    if (md)
+    {
+        EVP_MD_CTX_cleanup(&md_ctx);
+        return 1;
+    }
+    EVP_MD_CTX_cleanup(&md_ctx);
+#else
+    EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
     if (md_ctx)
     {
         const EVP_MD *md = EVP_sm3();
         if (md)
         {
-            EVP_MD_CTX_destroy(md_ctx);
+            EVP_MD_CTX_free(md_ctx);
             return 1;
         }
-        EVP_MD_CTX_destroy(md_ctx);
+        EVP_MD_CTX_free(md_ctx);
     }
+#endif
 
     return 0;
 }
@@ -177,7 +189,42 @@ int obs_sm3_hash(const unsigned char *data, int data_len, unsigned char *digest)
         return -2;
     }
 
-    EVP_MD_CTX *md_ctx = EVP_MD_CTX_create();
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    EVP_MD_CTX md_ctx;
+    EVP_MD_CTX_init(&md_ctx);
+
+    if (EVP_DigestInit_ex(&md_ctx, md, NULL) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to initialize digest", __FUNCTION__);
+        EVP_MD_CTX_cleanup(&md_ctx);
+        return -3;
+    }
+
+    if (EVP_DigestUpdate(&md_ctx, data, data_len) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to update digest", __FUNCTION__);
+        EVP_MD_CTX_cleanup(&md_ctx);
+        return -4;
+    }
+
+    unsigned int digest_len;
+    if (EVP_DigestFinal_ex(&md_ctx, digest, &digest_len) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to finalize digest", __FUNCTION__);
+        EVP_MD_CTX_cleanup(&md_ctx);
+        return -5;
+    }
+
+    if (digest_len != 32)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Invalid digest length: %u", __FUNCTION__, digest_len);
+        EVP_MD_CTX_cleanup(&md_ctx);
+        return -6;
+    }
+
+    EVP_MD_CTX_cleanup(&md_ctx);
+#else
+    EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
     if (!md_ctx)
     {
         COMMLOG(OBS_LOGERROR, "%s Failed to create EVP_MD_CTX", __FUNCTION__);
@@ -187,14 +234,14 @@ int obs_sm3_hash(const unsigned char *data, int data_len, unsigned char *digest)
     if (EVP_DigestInit_ex(md_ctx, md, NULL) != 1)
     {
         COMMLOG(OBS_LOGERROR, "%s Failed to initialize digest", __FUNCTION__);
-        EVP_MD_CTX_destroy(md_ctx);
+        EVP_MD_CTX_free(md_ctx);
         return -4;
     }
 
     if (EVP_DigestUpdate(md_ctx, data, data_len) != 1)
     {
         COMMLOG(OBS_LOGERROR, "%s Failed to update digest", __FUNCTION__);
-        EVP_MD_CTX_destroy(md_ctx);
+        EVP_MD_CTX_free(md_ctx);
         return -5;
     }
 
@@ -202,18 +249,20 @@ int obs_sm3_hash(const unsigned char *data, int data_len, unsigned char *digest)
     if (EVP_DigestFinal_ex(md_ctx, digest, &digest_len) != 1)
     {
         COMMLOG(OBS_LOGERROR, "%s Failed to finalize digest", __FUNCTION__);
-        EVP_MD_CTX_destroy(md_ctx);
+        EVP_MD_CTX_free(md_ctx);
         return -6;
     }
 
     if (digest_len != 32)
     {
         COMMLOG(OBS_LOGERROR, "%s Invalid digest length: %u", __FUNCTION__, digest_len);
-        EVP_MD_CTX_destroy(md_ctx);
+        EVP_MD_CTX_free(md_ctx);
         return -7;
     }
 
-    EVP_MD_CTX_destroy(md_ctx);
+    EVP_MD_CTX_free(md_ctx);
+#endif
+
     return 0;
 }
 
@@ -248,7 +297,37 @@ int obs_sm4_encrypt(const unsigned char *key, const unsigned char *iv,
         return -2;
     }
 
-    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_create();
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    EVP_CIPHER_CTX ctx;
+    EVP_CIPHER_CTX_init(&ctx);
+
+    if (EVP_EncryptInit_ex(&ctx, cipher, NULL, key, iv) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to initialize encryption", __FUNCTION__);
+        EVP_CIPHER_CTX_cleanup(&ctx);
+        return -3;
+    }
+
+    int out_len1 = *ciphertext_len;
+    if (EVP_EncryptUpdate(&ctx, ciphertext, &out_len1, plaintext, plaintext_len) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to encrypt data", __FUNCTION__);
+        EVP_CIPHER_CTX_cleanup(&ctx);
+        return -4;
+    }
+
+    int out_len2 = *ciphertext_len - out_len1;
+    if (EVP_EncryptFinal_ex(&ctx, ciphertext + out_len1, &out_len2) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to finalize encryption", __FUNCTION__);
+        EVP_CIPHER_CTX_cleanup(&ctx);
+        return -5;
+    }
+
+    *ciphertext_len = out_len1 + out_len2;
+    EVP_CIPHER_CTX_cleanup(&ctx);
+#else
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
     if (!ctx)
     {
         COMMLOG(OBS_LOGERROR, "%s Failed to create EVP_CIPHER_CTX", __FUNCTION__);
@@ -258,7 +337,7 @@ int obs_sm4_encrypt(const unsigned char *key, const unsigned char *iv,
     if (EVP_EncryptInit_ex(ctx, cipher, NULL, key, iv) != 1)
     {
         COMMLOG(OBS_LOGERROR, "%s Failed to initialize encryption", __FUNCTION__);
-        EVP_CIPHER_CTX_destroy(ctx);
+        EVP_CIPHER_CTX_free(ctx);
         return -4;
     }
 
@@ -266,7 +345,7 @@ int obs_sm4_encrypt(const unsigned char *key, const unsigned char *iv,
     if (EVP_EncryptUpdate(ctx, ciphertext, &out_len1, plaintext, plaintext_len) != 1)
     {
         COMMLOG(OBS_LOGERROR, "%s Failed to encrypt data", __FUNCTION__);
-        EVP_CIPHER_CTX_destroy(ctx);
+        EVP_CIPHER_CTX_free(ctx);
         return -5;
     }
 
@@ -274,12 +353,14 @@ int obs_sm4_encrypt(const unsigned char *key, const unsigned char *iv,
     if (EVP_EncryptFinal_ex(ctx, ciphertext + out_len1, &out_len2) != 1)
     {
         COMMLOG(OBS_LOGERROR, "%s Failed to finalize encryption", __FUNCTION__);
-        EVP_CIPHER_CTX_destroy(ctx);
+        EVP_CIPHER_CTX_free(ctx);
         return -6;
     }
 
     *ciphertext_len = out_len1 + out_len2;
-    EVP_CIPHER_CTX_destroy(ctx);
+    EVP_CIPHER_CTX_free(ctx);
+#endif
+
     return 0;
 }
 
@@ -314,7 +395,37 @@ int obs_sm4_decrypt(const unsigned char *key, const unsigned char *iv,
         return -2;
     }
 
-    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_create();
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    EVP_CIPHER_CTX ctx;
+    EVP_CIPHER_CTX_init(&ctx);
+
+    if (EVP_DecryptInit_ex(&ctx, cipher, NULL, key, iv) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to initialize decryption", __FUNCTION__);
+        EVP_CIPHER_CTX_cleanup(&ctx);
+        return -3;
+    }
+
+    int out_len1 = *plaintext_len;
+    if (EVP_DecryptUpdate(&ctx, plaintext, &out_len1, ciphertext, ciphertext_len) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to decrypt data", __FUNCTION__);
+        EVP_CIPHER_CTX_cleanup(&ctx);
+        return -4;
+    }
+
+    int out_len2 = *plaintext_len - out_len1;
+    if (EVP_DecryptFinal_ex(&ctx, plaintext + out_len1, &out_len2) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to finalize decryption", __FUNCTION__);
+        EVP_CIPHER_CTX_cleanup(&ctx);
+        return -5;
+    }
+
+    *plaintext_len = out_len1 + out_len2;
+    EVP_CIPHER_CTX_cleanup(&ctx);
+#else
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
     if (!ctx)
     {
         COMMLOG(OBS_LOGERROR, "%s Failed to create EVP_CIPHER_CTX", __FUNCTION__);
@@ -324,7 +435,7 @@ int obs_sm4_decrypt(const unsigned char *key, const unsigned char *iv,
     if (EVP_DecryptInit_ex(ctx, cipher, NULL, key, iv) != 1)
     {
         COMMLOG(OBS_LOGERROR, "%s Failed to initialize decryption", __FUNCTION__);
-        EVP_CIPHER_CTX_destroy(ctx);
+        EVP_CIPHER_CTX_free(ctx);
         return -4;
     }
 
@@ -332,7 +443,7 @@ int obs_sm4_decrypt(const unsigned char *key, const unsigned char *iv,
     if (EVP_DecryptUpdate(ctx, plaintext, &out_len1, ciphertext, ciphertext_len) != 1)
     {
         COMMLOG(OBS_LOGERROR, "%s Failed to decrypt data", __FUNCTION__);
-        EVP_CIPHER_CTX_destroy(ctx);
+        EVP_CIPHER_CTX_free(ctx);
         return -5;
     }
 
@@ -340,12 +451,14 @@ int obs_sm4_decrypt(const unsigned char *key, const unsigned char *iv,
     if (EVP_DecryptFinal_ex(ctx, plaintext + out_len1, &out_len2) != 1)
     {
         COMMLOG(OBS_LOGERROR, "%s Failed to finalize decryption", __FUNCTION__);
-        EVP_CIPHER_CTX_destroy(ctx);
+        EVP_CIPHER_CTX_free(ctx);
         return -6;
     }
 
     *plaintext_len = out_len1 + out_len2;
-    EVP_CIPHER_CTX_destroy(ctx);
+    EVP_CIPHER_CTX_free(ctx);
+#endif
+
     return 0;
 }
 
