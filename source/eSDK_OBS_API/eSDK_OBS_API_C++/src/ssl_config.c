@@ -23,6 +23,310 @@
 #define MAX_CONFIG_LINE 256
 #define CONFIG_FILE "OBS.ini"
 
+// 配置来源枚举
+typedef enum {
+    CONFIG_SOURCE_DEFAULT,    // 默认配置
+    CONFIG_SOURCE_INI,        // 配置文件
+    CONFIG_SOURCE_ENV,        // 环境变量
+    CONFIG_SOURCE_API         // API设置
+} config_source_t;
+
+// 配置项定义
+typedef struct {
+    const char *name;         // 配置项名称
+    config_source_t source;   // 配置来源
+    int integer_value;        // 整数值
+    const char *string_value; // 字符串值
+} config_item_t;
+
+// 配置上下文
+typedef struct {
+    obs_http_request_option config;
+    int is_initialized;
+    config_source_t source_map[OBS_CONFIG_MAX_ITEMS]; // 每个配置项的来源
+} config_context_t;
+
+// 全局配置上下文
+static config_context_t g_config_context = {0};
+
+// 配置项映射表
+static const char *config_item_names[] = {
+    "speed_limit",
+    "speed_time",
+    "connect_time",
+    "max_connected_time",
+    "keep_alive",
+    "keep_idle",
+    "keep_intvl",
+    "proxy_host",
+    "proxy_auth",
+    "ssl_cipher_list",
+    "forbid_reuse_tcp",
+    "curl_max_connects",
+    "http2_switch",
+    "bbr_switch",
+    "auth_switch",
+    "buffer_size",
+    "server_cert_path",
+    "curl_log_verbose",
+    "mutual_ssl_switch",
+    "client_cert_path",
+    "client_key_path",
+    "client_key_password",
+    "gm_mode_switch",
+    "ssl_min_version",
+    "ssl_max_version",
+    "ocsp_stapling",
+    "certificate_pin",
+    "certificate_pin_count",
+    "verify_hostname",
+    "enable_session_tickets",
+    "ssl_session_cache_timeout"
+};
+
+// 配置变更回调链表
+typedef struct callback_node {
+    config_change_callback_t callback;
+    struct callback_node *next;
+} callback_node_t;
+
+static callback_node_t *g_callback_list = NULL;
+
+// 设置配置项值（内部函数）
+static int config_set_internal(obs_config_item_t item, const char *value, config_source_t source)
+{
+    if (item < 0 || item >= OBS_CONFIG_MAX_ITEMS) {
+        COMMLOG(OBS_LOGERROR, "Invalid config item: %d", item);
+        return -1;
+    }
+
+    // 如果当前配置来源优先级更高，则不更新
+    if (g_config_context.source_map[item] > source) {
+        COMMLOG(OBS_LOGDEBUG, "Config item %s already set from higher priority source",
+                config_item_names[item]);
+        return 0;
+    }
+
+    // 更新配置
+    switch (item) {
+        case OBS_CONFIG_SPEED_LIMIT:
+            g_config_context.config.speed_limit = atoi(value);
+            break;
+        case OBS_CONFIG_SPEED_TIME:
+            g_config_context.config.speed_time = atoi(value);
+            break;
+        case OBS_CONFIG_CONNECT_TIME:
+            g_config_context.config.connect_time = atoi(value);
+            break;
+        case OBS_CONFIG_MAX_CONNECTED_TIME:
+            g_config_context.config.max_connected_time = atoi(value);
+            break;
+        case OBS_CONFIG_KEEP_ALIVE:
+            g_config_context.config.keep_alive = (strcmp(value, "true") == 0 || atoi(value) != 0);
+            break;
+        case OBS_CONFIG_KEEP_IDLE:
+            g_config_context.config.keep_idle = atoi(value);
+            break;
+        case OBS_CONFIG_KEEP_INTVL:
+            g_config_context.config.keep_intvl = atoi(value);
+            break;
+        case OBS_CONFIG_PROXY_HOST:
+            if (g_config_context.config.proxy_host) {
+                free(g_config_context.config.proxy_host);
+            }
+            g_config_context.config.proxy_host = strdup(value);
+            break;
+        case OBS_CONFIG_PROXY_AUTH:
+            if (g_config_context.config.proxy_auth) {
+                free(g_config_context.config.proxy_auth);
+            }
+            g_config_context.config.proxy_auth = strdup(value);
+            break;
+        case OBS_CONFIG_SSL_CIPHER_LIST:
+            if (g_config_context.config.ssl_cipher_list) {
+                free(g_config_context.config.ssl_cipher_list);
+            }
+            g_config_context.config.ssl_cipher_list = strdup(value);
+            break;
+        case OBS_CONFIG_FORBID_REUSE_TCP:
+            g_config_context.config.forbid_reuse_tcp = (strcmp(value, "true") == 0 || atoi(value) != 0);
+            break;
+        case OBS_CONFIG_CURL_MAX_CONNECTS:
+            g_config_context.config.curl_max_connects = atoi(value);
+            break;
+        case OBS_CONFIG_HTTP2_SWITCH:
+            g_config_context.config.http2_switch = atoi(value);
+            break;
+        case OBS_CONFIG_BBR_SWITCH:
+            g_config_context.config.bbr_switch = atoi(value);
+            break;
+        case OBS_CONFIG_AUTH_SWITCH:
+            g_config_context.config.auth_switch = atoi(value);
+            break;
+        case OBS_CONFIG_BUFFER_SIZE:
+            g_config_context.config.buffer_size = atoi(value);
+            break;
+        case OBS_CONFIG_SERVER_CERT_PATH:
+            if (g_config_context.config.server_cert_path) {
+                free(g_config_context.config.server_cert_path);
+            }
+            g_config_context.config.server_cert_path = strdup(value);
+            break;
+        case OBS_CONFIG_CURL_LOG_VERBOSE:
+            g_config_context.config.curl_log_verbose = (strcmp(value, "true") == 0 || atoi(value) != 0);
+            break;
+        case OBS_CONFIG_MUTUAL_SSL_SWITCH:
+            g_config_context.config.mutual_ssl_switch = atoi(value);
+            break;
+        case OBS_CONFIG_CLIENT_CERT_PATH:
+            if (g_config_context.config.client_cert_path) {
+                free(g_config_context.config.client_cert_path);
+            }
+            g_config_context.config.client_cert_path = strdup(value);
+            break;
+        case OBS_CONFIG_CLIENT_KEY_PATH:
+            if (g_config_context.config.client_key_path) {
+                free(g_config_context.config.client_key_path);
+            }
+            g_config_context.config.client_key_path = strdup(value);
+            break;
+        case OBS_CONFIG_CLIENT_KEY_PASSWORD:
+            if (g_config_context.config.client_key_password) {
+                free(g_config_context.config.client_key_password);
+            }
+            g_config_context.config.client_key_password = strdup(value);
+            break;
+        case OBS_CONFIG_GM_MODE_SWITCH:
+            g_config_context.config.gm_mode_switch = atoi(value);
+            break;
+        case OBS_CONFIG_SSL_MIN_VERSION: {
+            long ssl_version;
+            char temp_value[16] = {0};
+            strncpy_s(temp_value, sizeof(temp_value), value, strlen(value));
+            parse_ssl_version(temp_value, &ssl_version, CURL_SSLVERSION_TLSv1_2);
+            g_config_context.config.ssl_min_version = ssl_version;
+            break;
+        }
+        case OBS_CONFIG_SSL_MAX_VERSION: {
+            long ssl_version;
+            char temp_value[16] = {0};
+            strncpy_s(temp_value, sizeof(temp_value), value, strlen(value));
+            parse_ssl_version(temp_value, &ssl_version, (1 << 16) | 3);
+            g_config_context.config.ssl_max_version = ssl_version;
+            break;
+        }
+        case OBS_CONFIG_OCSP_STAPLING:
+            g_config_context.config.ocsp_stapling = (strcmp(value, "true") == 0 || atoi(value) != 0);
+            break;
+        case OBS_CONFIG_CERTIFICATE_PIN:
+            if (g_config_context.config.certificate_pin) {
+                free(g_config_context.config.certificate_pin);
+            }
+            g_config_context.config.certificate_pin = strdup(value);
+            break;
+        case OBS_CONFIG_CERTIFICATE_PIN_COUNT:
+            g_config_context.config.certificate_pin_count = atoi(value);
+            break;
+        case OBS_CONFIG_VERIFY_HOSTNAME:
+            g_config_context.config.verify_hostname = (strcmp(value, "true") == 0 || atoi(value) != 0);
+            break;
+        case OBS_CONFIG_ENABLE_SESSION_TICKETS:
+            g_config_context.config.enable_session_tickets = (strcmp(value, "true") == 0 || atoi(value) != 0);
+            break;
+        case OBS_CONFIG_SSL_SESSION_CACHE_TIMEOUT:
+            g_config_context.config.ssl_session_cache_timeout = atoi(value);
+            break;
+        default:
+            COMMLOG(OBS_LOGERROR, "Unsupported config item: %d", item);
+            return -2;
+    }
+
+    // 更新配置来源
+    g_config_context.source_map[item] = source;
+    COMMLOG(OBS_LOGINFO, "Config item %s set from %s source: %s",
+            config_item_names[item],
+            (source == CONFIG_SOURCE_DEFAULT ? "default" :
+             source == CONFIG_SOURCE_INI ? "ini file" :
+             source == CONFIG_SOURCE_ENV ? "environment" : "API"),
+            value);
+
+    // 触发配置变更回调
+    callback_node_t *current = g_callback_list;
+    while (current) {
+        current->callback(item, source);
+        current = current->next;
+    }
+
+    return 0;
+}
+
+// 设置整数配置项值（内部函数）
+static int config_set_int_internal(obs_config_item_t item, int value, config_source_t source)
+{
+    char str_value[64];
+    sprintf_s(str_value, sizeof(str_value), "%d", value);
+    return config_set_internal(item, str_value, source);
+}
+
+// 初始化默认配置
+static void config_manager_init_default(void)
+{
+    memset(&g_config_context.config, 0, sizeof(obs_http_request_option));
+
+    // 设置默认值
+    g_config_context.config.speed_limit = 0;
+    g_config_context.config.speed_time = 0;
+    g_config_context.config.connect_time = 30;
+    g_config_context.config.max_connected_time = 60;
+    g_config_context.config.keep_alive = true;
+    g_config_context.config.keep_idle = 60;
+    g_config_context.config.keep_intvl = 60;
+    g_config_context.config.proxy_host = NULL;
+    g_config_context.config.proxy_auth = NULL;
+    g_config_context.config.ssl_cipher_list = NULL;
+    g_config_context.config.forbid_reuse_tcp = false;
+    g_config_context.config.curl_max_connects = -1;
+    g_config_context.config.http2_switch = OBS_HTTP2_CLOSE;
+    g_config_context.config.bbr_switch = OBS_BBR_CLOSE;
+    g_config_context.config.auth_switch = OBS_NEGOTIATION_TYPE;
+    g_config_context.config.buffer_size = 0;
+    g_config_context.config.server_cert_path = NULL;
+    g_config_context.config.curl_log_verbose = false;
+    g_config_context.config.mutual_ssl_switch = OBS_MUTUAL_SSL_CLOSE;
+    g_config_context.config.client_cert_path = NULL;
+    g_config_context.config.client_key_path = NULL;
+    g_config_context.config.client_key_password = NULL;
+    g_config_context.config.gm_mode_switch = OBS_GM_MODE_CLOSE;
+    g_config_context.config.ssl_min_version = CURL_SSLVERSION_TLSv1_2;
+    g_config_context.config.ssl_max_version = (1 << 16) | 3; // TLSv1.3
+
+    // 高级SSL功能默认值
+    g_config_context.config.ocsp_stapling = false;               // 禁用OCSP stapling
+    g_config_context.config.certificate_pin = NULL;              // 未设置证书锁定
+    g_config_context.config.certificate_pin_count = 0;           // 证书锁定哈希值数量为0
+    g_config_context.config.verify_hostname = true;              // 启用主机名验证
+    g_config_context.config.enable_session_tickets = true;       // 启用SSL会话票证
+    g_config_context.config.ssl_session_cache_timeout = 300;     // SSL会话缓存超时时间为300秒
+
+    // 标记所有配置项来源为默认值
+    for (int i = 0; i < OBS_CONFIG_MAX_ITEMS; i++) {
+        g_config_context.source_map[i] = CONFIG_SOURCE_DEFAULT;
+    }
+
+    COMMLOG(OBS_LOGDEBUG, "Default configuration initialized");
+}
+
+// 配置项名称到索引的映射
+static int config_name_to_index(const char *name)
+{
+    for (int i = 0; i < OBS_CONFIG_MAX_ITEMS; i++) {
+        if (strcmp(config_item_names[i], name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 // 辅助函数：去除字符串首尾的空白字符
 static char *trim_string(char *str)
 {
@@ -267,6 +571,28 @@ static int validate_ssl_config(const obs_http_request_option *config)
         }
     }
 
+    // 验证证书锁定配置
+    if (config->certificate_pin)
+    {
+        if (strlen(config->certificate_pin) == 0)
+        {
+            COMMLOG(OBS_LOGERROR, "%s Certificate pin is empty", __FUNCTION__);
+            validation_result = -8;
+        }
+        else if (config->certificate_pin_count <= 0)
+        {
+            COMMLOG(OBS_LOGERROR, "%s Certificate pin count must be greater than 0", __FUNCTION__);
+            validation_result = -9;
+        }
+    }
+
+    // 验证SSL会话缓存超时时间
+    if (config->ssl_session_cache_timeout < 0)
+    {
+        COMMLOG(OBS_LOGERROR, "%s SSL session cache timeout must be a non-negative value", __FUNCTION__);
+        validation_result = -10;
+    }
+
     // 输出验证结果详细信息
     if (validation_result != 0)
     {
@@ -368,6 +694,76 @@ static void load_ssl_config_from_env(obs_options *options)
     {
         parse_ssl_version(ssl_max_ver_env, &options->request_options.ssl_max_version, (1 << 16) | 3);
     }
+
+    // 高级SSL功能配置
+    const char *ocsp_stapling_env = getenv("OBS_OCSP_STAPLING");
+    if (ocsp_stapling_env)
+    {
+        if (strcmp(ocsp_stapling_env, "true") == 0 || strcmp(ocsp_stapling_env, "1") == 0)
+        {
+            options->request_options.ocsp_stapling = true;
+            COMMLOG(OBS_LOGINFO, "%s OCSP stapling enabled from environment variable", __FUNCTION__);
+        }
+        else if (strcmp(ocsp_stapling_env, "false") == 0 || strcmp(ocsp_stapling_env, "0") == 0)
+        {
+            options->request_options.ocsp_stapling = false;
+            COMMLOG(OBS_LOGINFO, "%s OCSP stapling disabled from environment variable", __FUNCTION__);
+        }
+    }
+
+    const char *certificate_pin_env = getenv("OBS_CERTIFICATE_PIN");
+    if (certificate_pin_env)
+    {
+        int result = alloc_copy_string(certificate_pin_env, &options->request_options.certificate_pin);
+        if (result != 0)
+        {
+            COMMLOG(OBS_LOGERROR, "%s Failed to copy certificate pin from environment variable, error code: %d", __FUNCTION__, result);
+        }
+    }
+
+    const char *certificate_pin_count_env = getenv("OBS_CERTIFICATE_PIN_COUNT");
+    if (certificate_pin_count_env)
+    {
+        options->request_options.certificate_pin_count = atoi(certificate_pin_count_env);
+        COMMLOG(OBS_LOGINFO, "%s Certificate pin count set from environment variable: %d", __FUNCTION__, options->request_options.certificate_pin_count);
+    }
+
+    const char *verify_hostname_env = getenv("OBS_VERIFY_HOSTNAME");
+    if (verify_hostname_env)
+    {
+        if (strcmp(verify_hostname_env, "true") == 0 || strcmp(verify_hostname_env, "1") == 0)
+        {
+            options->request_options.verify_hostname = true;
+            COMMLOG(OBS_LOGINFO, "%s Hostname verification enabled from environment variable", __FUNCTION__);
+        }
+        else if (strcmp(verify_hostname_env, "false") == 0 || strcmp(verify_hostname_env, "0") == 0)
+        {
+            options->request_options.verify_hostname = false;
+            COMMLOG(OBS_LOGINFO, "%s Hostname verification disabled from environment variable", __FUNCTION__);
+        }
+    }
+
+    const char *enable_session_tickets_env = getenv("OBS_ENABLE_SESSION_TICKETS");
+    if (enable_session_tickets_env)
+    {
+        if (strcmp(enable_session_tickets_env, "true") == 0 || strcmp(enable_session_tickets_env, "1") == 0)
+        {
+            options->request_options.enable_session_tickets = true;
+            COMMLOG(OBS_LOGINFO, "%s SSL session tickets enabled from environment variable", __FUNCTION__);
+        }
+        else if (strcmp(enable_session_tickets_env, "false") == 0 || strcmp(enable_session_tickets_env, "0") == 0)
+        {
+            options->request_options.enable_session_tickets = false;
+            COMMLOG(OBS_LOGINFO, "%s SSL session tickets disabled from environment variable", __FUNCTION__);
+        }
+    }
+
+    const char *ssl_session_cache_timeout_env = getenv("OBS_SSL_SESSION_CACHE_TIMEOUT");
+    if (ssl_session_cache_timeout_env)
+    {
+        options->request_options.ssl_session_cache_timeout = atoi(ssl_session_cache_timeout_env);
+        COMMLOG(OBS_LOGINFO, "%s SSL session cache timeout set from environment variable: %d seconds", __FUNCTION__, options->request_options.ssl_session_cache_timeout);
+    }
 }
 
 // 初始化HTTP请求配置选项
@@ -407,6 +803,14 @@ void init_http_request_option(obs_http_request_option *options)
     options->gm_mode_switch = OBS_GM_MODE_CLOSE;
     options->ssl_min_version = CURL_SSLVERSION_TLSv1_2;
     options->ssl_max_version = (1 << 16) | 3; // TLSv1.3
+
+    // 高级SSL功能默认值
+    options->ocsp_stapling = false;               // 禁用OCSP stapling
+    options->certificate_pin = NULL;              // 未设置证书锁定
+    options->certificate_pin_count = 0;           // 证书锁定哈希值数量为0
+    options->verify_hostname = true;              // 启用主机名验证
+    options->enable_session_tickets = true;       // 启用SSL会话票证
+    options->ssl_session_cache_timeout = 300;     // SSL会话缓存超时时间为300秒
 
     COMMLOG(OBS_LOGDEBUG, "%s HTTP request options initialized with default values", __FUNCTION__);
 }
@@ -561,185 +965,198 @@ static char *get_config_file_path(void)
     return NULL;
 }
 
-void load_ssl_config_from_ini(obs_options *options)
+/**
+ * @brief 初始化配置管理系统
+ */
+void config_manager_init(void)
 {
-    if (!options)
-    {
-        COMMLOG(OBS_LOGERROR, "%s Options parameter is NULL", __FUNCTION__);
+    if (g_config_context.is_initialized) {
+        COMMLOG(OBS_LOGWARN, "Config manager already initialized");
         return;
     }
 
-    // 获取配置文件路径
+    config_manager_init_default();
+    g_config_context.is_initialized = 1;
+
+    COMMLOG(OBS_LOGINFO, "Config manager initialized");
+}
+
+/**
+ * @brief 销毁配置管理系统
+ */
+void config_manager_destroy(void)
+{
+    if (!g_config_context.is_initialized) {
+        COMMLOG(OBS_LOGWARN, "Config manager not initialized");
+        return;
+    }
+
+    // 释放字符串资源
+    if (g_config_context.config.proxy_host) {
+        free(g_config_context.config.proxy_host);
+    }
+    if (g_config_context.config.proxy_auth) {
+        free(g_config_context.config.proxy_auth);
+    }
+    if (g_config_context.config.ssl_cipher_list) {
+        free(g_config_context.config.ssl_cipher_list);
+    }
+    if (g_config_context.config.server_cert_path) {
+        free(g_config_context.config.server_cert_path);
+    }
+    if (g_config_context.config.client_cert_path) {
+        free(g_config_context.config.client_cert_path);
+    }
+    if (g_config_context.config.client_key_path) {
+        free(g_config_context.config.client_key_path);
+    }
+    if (g_config_context.config.client_key_password) {
+        free(g_config_context.config.client_key_password);
+    }
+    if (g_config_context.config.certificate_pin) {
+        free(g_config_context.config.certificate_pin);
+    }
+
+    // 清除回调列表
+    callback_node_t *current = g_callback_list;
+    while (current) {
+        callback_node_t *next = current->next;
+        free(current);
+        current = next;
+    }
+    g_callback_list = NULL;
+
+    // 重置配置上下文
+    memset(&g_config_context, 0, sizeof(config_context_t));
+
+    COMMLOG(OBS_LOGINFO, "Config manager destroyed");
+}
+
+/**
+ * @brief 从配置文件加载配置
+ */
+static int config_manager_load_ini(void)
+{
     char *config_path = get_config_file_path();
-    if (!config_path)
-    {
-        // 尝试默认位置
-        if (!file_exists(CONFIG_FILE))
-        {
-            COMMLOG(OBS_LOGWARN, "%s Config file not found: %s", __FUNCTION__, CONFIG_FILE);
-            load_ssl_config_from_env(options);
-            return;
-        }
-        config_path = strdup(CONFIG_FILE);
+    if (!config_path) {
+        COMMLOG(OBS_LOGWARN, "Config file not found in any standard locations");
+        return -1;
     }
 
     FILE *fp = fopen(config_path, "r");
-    if (!fp)
-    {
-        COMMLOG(OBS_LOGERROR, "%s Failed to open config file: %s", __FUNCTION__, config_path);
+    if (!fp) {
+        COMMLOG(OBS_LOGERROR, "Failed to open config file: %s", config_path);
         free(config_path);
-        load_ssl_config_from_env(options);
-        return;
+        return -2;
     }
 
-    // 验证配置文件格式的有效性
     int format_validity = validate_config_file_format(fp);
-    if (format_validity < 0)
-    {
-        COMMLOG(OBS_LOGERROR, "%s Failed to validate config file format, error code: %d", __FUNCTION__, format_validity);
+    if (format_validity < 0) {
+        COMMLOG(OBS_LOGERROR, "Failed to validate config file format, error code: %d", format_validity);
         fclose(fp);
         free(config_path);
-        load_ssl_config_from_env(options);
-        return;
+        return -3;
     }
 
-    COMMLOG(OBS_LOGINFO, "%s Loading SSL configuration from: %s", __FUNCTION__, config_path);
+    COMMLOG(OBS_LOGINFO, "Loading SSL configuration from: %s", config_path);
 
     char line[MAX_CONFIG_LINE] = {0};
     int in_ssl_config = 0;
 
-    char mutual_ssl_str[16] = {0};
-    char client_cert_path[1024] = {0};
-    char client_key_path[1024] = {0};
-    char client_key_password[64] = {0};
-    char gm_mode_str[16] = {0};
-    char ssl_cipher_list[512] = {0};
-    char ssl_min_ver_str[16] = {0};
-    char ssl_max_ver_str[16] = {0};
-
     int line_number = 0;
-    while (fgets(line, sizeof(line), fp))
-    {
+    while (fgets(line, sizeof(line), fp)) {
         line_number++;
-        // 跳过空行和注释
-        if (line[0] == '\n' || line[0] == '#' || line[0] == ';' || line[0] == '\r')
-        {
+        if (line[0] == '\n' || line[0] == '#' || line[0] == ';' || line[0] == '\r') {
             continue;
         }
 
-        // 检测 [SSLConfig] 段
-        if (strstr(line, "[SSLConfig]"))
-        {
+        if (strstr(line, "[SSLConfig]")) {
             in_ssl_config = 1;
-            COMMLOG(OBS_LOGDEBUG, "%s Found SSLConfig section at line %d", __FUNCTION__, line_number);
+            COMMLOG(OBS_LOGDEBUG, "Found SSLConfig section at line %d", line_number);
             continue;
-        }
-        else if (line[0] == '[')
-        {
+        } else if (line[0] == '[') {
             in_ssl_config = 0;
             continue;
         }
 
-        if (!in_ssl_config)
-        {
+        if (!in_ssl_config) {
             continue;
         }
 
-        // 解析配置项
-        if (strstr(line, "MutualSSLEnabled"))
-        {
-            int result = parse_config_string_value(line, mutual_ssl_str, sizeof(mutual_ssl_str));
-            if (result == 0)
-            {
-                COMMLOG(OBS_LOGDEBUG, "%s Parsed MutualSSLEnabled: %s", __FUNCTION__, mutual_ssl_str);
+        char key[MAX_CONFIG_LINE] = {0};
+        char value[MAX_CONFIG_LINE] = {0};
+        char *eq_pos = strchr(line, '=');
+        if (eq_pos) {
+            int key_len = eq_pos - line;
+            strncpy_s(key, sizeof(key), line, key_len);
+            key[key_len] = '\0';
+
+            trim_string(key);
+            trim_string(eq_pos + 1);
+            strncpy_s(value, sizeof(value), eq_pos + 1, strlen(eq_pos + 1));
+            value[strcspn(value, "\r\n")] = '\0';
+
+            // 将配置项名称转换为枚举值
+            int item_index = -1;
+            if (strcmp(key, "MutualSSLEnabled") == 0) {
+                item_index = OBS_CONFIG_MUTUAL_SSL_SWITCH;
+                if (strcmp(value, "true") == 0) {
+                    strcpy_s(value, sizeof(value), "1"); // OBS_MUTUAL_SSL_OPEN
+                } else if (strcmp(value, "false") == 0) {
+                    strcpy_s(value, sizeof(value), "0"); // OBS_MUTUAL_SSL_CLOSE
+                }
+            } else if (strcmp(key, "ClientCertPath") == 0) {
+                item_index = OBS_CONFIG_CLIENT_CERT_PATH;
+            } else if (strcmp(key, "ClientKeyPath") == 0) {
+                item_index = OBS_CONFIG_CLIENT_KEY_PATH;
+            } else if (strcmp(key, "ClientKeyPassword") == 0) {
+                item_index = OBS_CONFIG_CLIENT_KEY_PASSWORD;
+            } else if (strcmp(key, "GMModeEnabled") == 0) {
+                item_index = OBS_CONFIG_GM_MODE_SWITCH;
+                if (strcmp(value, "true") == 0) {
+                    strcpy_s(value, sizeof(value), "1"); // OBS_GM_MODE_OPEN
+                } else if (strcmp(value, "false") == 0) {
+                    strcpy_s(value, sizeof(value), "0"); // OBS_GM_MODE_CLOSE
+                }
+            } else if (strcmp(key, "CipherList") == 0) {
+                item_index = OBS_CONFIG_SSL_CIPHER_LIST;
+            } else if (strcmp(key, "SSLMinVersion") == 0) {
+                item_index = OBS_CONFIG_SSL_MIN_VERSION;
+            } else if (strcmp(key, "SSLMaxVersion") == 0) {
+                item_index = OBS_CONFIG_SSL_MAX_VERSION;
+            } else if (strcmp(key, "OCSPStapling") == 0) {
+                item_index = OBS_CONFIG_OCSP_STAPLING;
+                if (strcmp(value, "true") == 0) {
+                    strcpy_s(value, sizeof(value), "1");
+                } else if (strcmp(value, "false") == 0) {
+                    strcpy_s(value, sizeof(value), "0");
+                }
+            } else if (strcmp(key, "CertificatePin") == 0) {
+                item_index = OBS_CONFIG_CERTIFICATE_PIN;
+            } else if (strcmp(key, "CertificatePinCount") == 0) {
+                item_index = OBS_CONFIG_CERTIFICATE_PIN_COUNT;
+            } else if (strcmp(key, "VerifyHostname") == 0) {
+                item_index = OBS_CONFIG_VERIFY_HOSTNAME;
+                if (strcmp(value, "true") == 0) {
+                    strcpy_s(value, sizeof(value), "1");
+                } else if (strcmp(value, "false") == 0) {
+                    strcpy_s(value, sizeof(value), "0");
+                }
+            } else if (strcmp(key, "EnableSessionTickets") == 0) {
+                item_index = OBS_CONFIG_ENABLE_SESSION_TICKETS;
+                if (strcmp(value, "true") == 0) {
+                    strcpy_s(value, sizeof(value), "1");
+                } else if (strcmp(value, "false") == 0) {
+                    strcpy_s(value, sizeof(value), "0");
+                }
+            } else if (strcmp(key, "SSLSessionCacheTimeout") == 0) {
+                item_index = OBS_CONFIG_SSL_SESSION_CACHE_TIMEOUT;
             }
-            else
-            {
-                COMMLOG(OBS_LOGERROR, "%s Failed to parse MutualSSLEnabled, error code: %d", __FUNCTION__, result);
-            }
-        }
-        else if (strstr(line, "ClientCertPath"))
-        {
-            int result = parse_config_string_value(line, client_cert_path, sizeof(client_cert_path));
-            if (result == 0)
-            {
-                COMMLOG(OBS_LOGDEBUG, "%s Parsed ClientCertPath: %s", __FUNCTION__, client_cert_path);
-            }
-            else
-            {
-                COMMLOG(OBS_LOGERROR, "%s Failed to parse ClientCertPath, error code: %d", __FUNCTION__, result);
-            }
-        }
-        else if (strstr(line, "ClientKeyPath"))
-        {
-            int result = parse_config_string_value(line, client_key_path, sizeof(client_key_path));
-            if (result == 0)
-            {
-                COMMLOG(OBS_LOGDEBUG, "%s Parsed ClientKeyPath: %s", __FUNCTION__, client_key_path);
-            }
-            else
-            {
-                COMMLOG(OBS_LOGERROR, "%s Failed to parse ClientKeyPath, error code: %d", __FUNCTION__, result);
-            }
-        }
-        else if (strstr(line, "ClientKeyPassword"))
-        {
-            int result = parse_config_string_value(line, client_key_password, sizeof(client_key_password));
-            if (result == 0)
-            {
-                COMMLOG(OBS_LOGDEBUG, "%s Parsed ClientKeyPassword: %s", __FUNCTION__, client_key_password);
-            }
-            else
-            {
-                COMMLOG(OBS_LOGERROR, "%s Failed to parse ClientKeyPassword, error code: %d", __FUNCTION__, result);
-            }
-        }
-        else if (strstr(line, "GMModeEnabled"))
-        {
-            int result = parse_config_string_value(line, gm_mode_str, sizeof(gm_mode_str));
-            if (result == 0)
-            {
-                COMMLOG(OBS_LOGDEBUG, "%s Parsed GMModeEnabled: %s", __FUNCTION__, gm_mode_str);
-            }
-            else
-            {
-                COMMLOG(OBS_LOGERROR, "%s Failed to parse GMModeEnabled, error code: %d", __FUNCTION__, result);
-            }
-        }
-        else if (strstr(line, "CipherList"))
-        {
-            int result = parse_config_string_value(line, ssl_cipher_list, sizeof(ssl_cipher_list));
-            if (result == 0)
-            {
-                COMMLOG(OBS_LOGDEBUG, "%s Parsed CipherList: %s", __FUNCTION__, ssl_cipher_list);
-            }
-            else
-            {
-                COMMLOG(OBS_LOGERROR, "%s Failed to parse CipherList, error code: %d", __FUNCTION__, result);
-            }
-        }
-        else if (strstr(line, "SSLMinVersion"))
-        {
-            int result = parse_config_string_value(line, ssl_min_ver_str, sizeof(ssl_min_ver_str));
-            if (result == 0)
-            {
-                COMMLOG(OBS_LOGDEBUG, "%s Parsed SSLMinVersion: %s", __FUNCTION__, ssl_min_ver_str);
-            }
-            else
-            {
-                COMMLOG(OBS_LOGERROR, "%s Failed to parse SSLMinVersion, error code: %d", __FUNCTION__, result);
-            }
-        }
-        else if (strstr(line, "SSLMaxVersion"))
-        {
-            int result = parse_config_string_value(line, ssl_max_ver_str, sizeof(ssl_max_ver_str));
-            if (result == 0)
-            {
-                COMMLOG(OBS_LOGDEBUG, "%s Parsed SSLMaxVersion: %s", __FUNCTION__, ssl_max_ver_str);
-            }
-            else
-            {
-                COMMLOG(OBS_LOGERROR, "%s Failed to parse SSLMaxVersion, error code: %d", __FUNCTION__, result);
+
+            if (item_index != -1) {
+                config_set_internal(item_index, value, CONFIG_SOURCE_INI);
+            } else {
+                COMMLOG(OBS_LOGWARN, "Unknown config key: %s", key);
             }
         }
     }
@@ -747,69 +1164,402 @@ void load_ssl_config_from_ini(obs_options *options)
     fclose(fp);
     free(config_path);
 
-    // 应用双向SSL配置
-    if (strcmp(mutual_ssl_str, "true") == 0)
-    {
-        options->request_options.mutual_ssl_switch = OBS_MUTUAL_SSL_OPEN;
-        COMMLOG(OBS_LOGINFO, "%s Mutual SSL enabled from config", __FUNCTION__);
-    }
-    else if (strcmp(mutual_ssl_str, "false") == 0)
-    {
-        options->request_options.mutual_ssl_switch = OBS_MUTUAL_SSL_CLOSE;
-        COMMLOG(OBS_LOGINFO, "%s Mutual SSL disabled from config", __FUNCTION__);
+    return 0;
+}
+
+/**
+ * @brief 从环境变量加载配置
+ */
+static int config_manager_load_env(void)
+{
+    const char *env_vars[] = {
+        "OBS_MUTUAL_SSL_ENABLED",
+        "OBS_CLIENT_CERT_PATH",
+        "OBS_CLIENT_KEY_PATH",
+        "OBS_CLIENT_KEY_PASSWORD",
+        "OBS_GM_MODE_ENABLED",
+        "OBS_SSL_CIPHER_LIST",
+        "OBS_SSL_MIN_VERSION",
+        "OBS_SSL_MAX_VERSION",
+        "OBS_OCSP_STAPLING",
+        "OBS_CERTIFICATE_PIN",
+        "OBS_CERTIFICATE_PIN_COUNT",
+        "OBS_VERIFY_HOSTNAME",
+        "OBS_ENABLE_SESSION_TICKETS",
+        "OBS_SSL_SESSION_CACHE_TIMEOUT"
+    };
+
+    obs_config_item_t config_items[] = {
+        OBS_CONFIG_MUTUAL_SSL_SWITCH,
+        OBS_CONFIG_CLIENT_CERT_PATH,
+        OBS_CONFIG_CLIENT_KEY_PATH,
+        OBS_CONFIG_CLIENT_KEY_PASSWORD,
+        OBS_CONFIG_GM_MODE_SWITCH,
+        OBS_CONFIG_SSL_CIPHER_LIST,
+        OBS_CONFIG_SSL_MIN_VERSION,
+        OBS_CONFIG_SSL_MAX_VERSION,
+        OBS_CONFIG_OCSP_STAPLING,
+        OBS_CONFIG_CERTIFICATE_PIN,
+        OBS_CONFIG_CERTIFICATE_PIN_COUNT,
+        OBS_CONFIG_VERIFY_HOSTNAME,
+        OBS_CONFIG_ENABLE_SESSION_TICKETS,
+        OBS_CONFIG_SSL_SESSION_CACHE_TIMEOUT
+    };
+
+    for (int i = 0; i < sizeof(env_vars) / sizeof(env_vars[0]); i++) {
+        const char *env_value = getenv(env_vars[i]);
+        if (env_value) {
+            char value[MAX_CONFIG_LINE] = {0};
+            strncpy_s(value, sizeof(value), env_value, strlen(env_value));
+
+            // 处理布尔类型的配置
+            if (i == 0 || i == 4) { // MutualSSLEnabled 或 GMModeEnabled
+                if (strcmp(env_value, "true") == 0 || strcmp(env_value, "1") == 0) {
+                    strcpy_s(value, sizeof(value), "1"); // Open
+                } else if (strcmp(env_value, "false") == 0 || strcmp(env_value, "0") == 0) {
+                    strcpy_s(value, sizeof(value), "0"); // Close
+                }
+            }
+
+            config_set_internal(config_items[i], value, CONFIG_SOURCE_ENV);
+        }
     }
 
-    int result = alloc_copy_string(client_cert_path, &options->request_options.client_cert_path);
-    if (result != 0)
-    {
-        COMMLOG(OBS_LOGERROR, "%s Failed to copy client certificate path, error code: %d", __FUNCTION__, result);
+    return 0;
+}
+
+/**
+ * @brief 加载完整配置
+ */
+int config_manager_load(void)
+{
+    if (!g_config_context.is_initialized) {
+        COMMLOG(OBS_LOGERROR, "Config manager not initialized");
+        return -1;
     }
 
-    result = alloc_copy_string(client_key_path, &options->request_options.client_key_path);
-    if (result != 0)
-    {
-        COMMLOG(OBS_LOGERROR, "%s Failed to copy client key path, error code: %d", __FUNCTION__, result);
+    int ini_result = config_manager_load_ini();
+    int env_result = config_manager_load_env();
+
+    // 验证配置
+    int validation_result = validate_ssl_config(&g_config_context.config);
+    if (validation_result != 0) {
+        COMMLOG(OBS_LOGERROR, "SSL configuration validation failed with error code: %d", validation_result);
+        return -3;
     }
 
-    result = alloc_copy_string(client_key_password, &options->request_options.client_key_password);
-    if (result != 0)
-    {
-        COMMLOG(OBS_LOGERROR, "%s Failed to copy client key password, error code: %d", __FUNCTION__, result);
+    COMMLOG(OBS_LOGINFO, "Configuration loaded successfully");
+
+    if (ini_result != 0) {
+        COMMLOG(OBS_LOGWARN, "Failed to load config from ini file, but environment variables may have been loaded");
     }
 
-    // 应用国密模式配置
-    if (strcmp(gm_mode_str, "true") == 0)
-    {
-        options->request_options.gm_mode_switch = OBS_GM_MODE_OPEN;
-        COMMLOG(OBS_LOGINFO, "%s GM mode enabled from config", __FUNCTION__);
-    }
-    else if (strcmp(gm_mode_str, "false") == 0)
-    {
-        options->request_options.gm_mode_switch = OBS_GM_MODE_CLOSE;
-        COMMLOG(OBS_LOGINFO, "%s GM mode disabled from config", __FUNCTION__);
-    }
+    return 0;
+}
 
-    int result = alloc_copy_string(ssl_cipher_list, &options->request_options.ssl_cipher_list);
-    if (result != 0)
-    {
-        COMMLOG(OBS_LOGERROR, "%s Failed to copy SSL cipher list, error code: %d", __FUNCTION__, result);
+/**
+ * @brief 获取配置
+ */
+void config_manager_get(obs_http_request_option *config)
+{
+    if (!g_config_context.is_initialized) {
+        COMMLOG(OBS_LOGERROR, "Config manager not initialized");
+        init_http_request_option(config);
+        return;
     }
 
-    // 应用SSL版本配置
-    parse_ssl_version(ssl_min_ver_str, &options->request_options.ssl_min_version, CURL_SSLVERSION_TLSv1_2);
-    parse_ssl_version(ssl_max_ver_str, &options->request_options.ssl_max_version, (1 << 16) | 3);
+    if (config) {
+        memcpy(config, &g_config_context.config, sizeof(obs_http_request_option));
+    }
+}
 
-    // 应用环境变量配置（环境变量优先级高于配置文件）
+/**
+ * @brief 设置配置项
+ */
+int config_manager_set(obs_config_item_t item, const char *value)
+{
+    if (!g_config_context.is_initialized) {
+        COMMLOG(OBS_LOGERROR, "Config manager not initialized");
+        return -1;
+    }
+
+    if (!value) {
+        COMMLOG(OBS_LOGERROR, "Value parameter is NULL");
+        return -2;
+    }
+
+    return config_set_internal(item, value, CONFIG_SOURCE_API);
+}
+
+/**
+ * @brief 设置整数配置项
+ */
+int config_manager_set_int(obs_config_item_t item, int value)
+{
+    if (!g_config_context.is_initialized) {
+        COMMLOG(OBS_LOGERROR, "Config manager not initialized");
+        return -1;
+    }
+
+    return config_set_int_internal(item, value, CONFIG_SOURCE_API);
+}
+
+/**
+ * @brief 获取配置项的来源
+ */
+config_source_t config_manager_get_source(obs_config_item_t item)
+{
+    if (!g_config_context.is_initialized) {
+        COMMLOG(OBS_LOGERROR, "Config manager not initialized");
+        return CONFIG_SOURCE_DEFAULT;
+    }
+
+    if (item < 0 || item >= OBS_CONFIG_MAX_ITEMS) {
+        COMMLOG(OBS_LOGERROR, "Invalid config item: %d", item);
+        return CONFIG_SOURCE_DEFAULT;
+    }
+
+    return g_config_context.source_map[item];
+}
+
+/**
+ * @brief 注册配置变更监听回调
+ */
+void config_manager_register_callback(config_change_callback_t callback)
+{
+    if (!callback) {
+        COMMLOG(OBS_LOGERROR, "Callback parameter is NULL");
+        return;
+    }
+
+    // 检查回调是否已注册
+    callback_node_t *current = g_callback_list;
+    while (current) {
+        if (current->callback == callback) {
+            COMMLOG(OBS_LOGWARN, "Callback already registered");
+            return;
+        }
+        current = current->next;
+    }
+
+    // 创建新的回调节点
+    callback_node_t *new_node = (callback_node_t *)malloc(sizeof(callback_node_t));
+    if (!new_node) {
+        COMMLOG(OBS_LOGERROR, "Failed to allocate memory for callback node");
+        return;
+    }
+
+    new_node->callback = callback;
+    new_node->next = g_callback_list;
+    g_callback_list = new_node;
+
+    COMMLOG(OBS_LOGINFO, "Config change callback registered");
+}
+
+/**
+ * @brief 卸载配置变更监听回调
+ */
+void config_manager_unregister_callback(config_change_callback_t callback)
+{
+    if (!callback) {
+        COMMLOG(OBS_LOGERROR, "Callback parameter is NULL");
+        return;
+    }
+
+    callback_node_t **current = &g_callback_list;
+    while (*current) {
+        if ((*current)->callback == callback) {
+            callback_node_t *temp = *current;
+            *current = temp->next;
+            free(temp);
+            COMMLOG(OBS_LOGINFO, "Config change callback unregistered");
+            return;
+        }
+        current = &((*current)->next);
+    }
+
+    COMMLOG(OBS_LOGWARN, "Callback not found");
+}
+
+/**
+ * @brief 导出配置到字符串
+ */
+int config_manager_export(char *buffer, int buffer_size)
+{
+    if (!g_config_context.is_initialized) {
+        COMMLOG(OBS_LOGERROR, "Config manager not initialized");
+        return -1;
+    }
+
+    if (!buffer || buffer_size <= 0) {
+        COMMLOG(OBS_LOGERROR, "Invalid parameters");
+        return -2;
+    }
+
+    int offset = 0;
+    int result = 0;
+
+    result = sprintf_s(buffer + offset, buffer_size - offset, "SSL Configuration:\n");
+    if (result < 0) return -3;
+    offset += result;
+
+    // 导出每个配置项
+    for (int i = 0; i < OBS_CONFIG_MAX_ITEMS; i++) {
+        const char *source_str;
+        switch (g_config_context.source_map[i]) {
+            case CONFIG_SOURCE_DEFAULT:
+                source_str = "Default";
+                break;
+            case CONFIG_SOURCE_INI:
+                source_str = "INI File";
+                break;
+            case CONFIG_SOURCE_ENV:
+                source_str = "Environment";
+                break;
+            case CONFIG_SOURCE_API:
+                source_str = "API";
+                break;
+            default:
+                source_str = "Unknown";
+        }
+
+        char value_str[128] = {0};
+        switch (i) {
+            case OBS_CONFIG_SPEED_LIMIT:
+                sprintf_s(value_str, sizeof(value_str), "%d", g_config_context.config.speed_limit);
+                break;
+            case OBS_CONFIG_SPEED_TIME:
+                sprintf_s(value_str, sizeof(value_str), "%d", g_config_context.config.speed_time);
+                break;
+            case OBS_CONFIG_CONNECT_TIME:
+                sprintf_s(value_str, sizeof(value_str), "%d", g_config_context.config.connect_time);
+                break;
+            case OBS_CONFIG_MAX_CONNECTED_TIME:
+                sprintf_s(value_str, sizeof(value_str), "%d", g_config_context.config.max_connected_time);
+                break;
+            case OBS_CONFIG_KEEP_ALIVE:
+                sprintf_s(value_str, sizeof(value_str), "%s", g_config_context.config.keep_alive ? "true" : "false");
+                break;
+            case OBS_CONFIG_KEEP_IDLE:
+                sprintf_s(value_str, sizeof(value_str), "%d", g_config_context.config.keep_idle);
+                break;
+            case OBS_CONFIG_KEEP_INTVL:
+                sprintf_s(value_str, sizeof(value_str), "%d", g_config_context.config.keep_intvl);
+                break;
+            case OBS_CONFIG_PROXY_HOST:
+                sprintf_s(value_str, sizeof(value_str), "%s", g_config_context.config.proxy_host ? g_config_context.config.proxy_host : "NULL");
+                break;
+            case OBS_CONFIG_PROXY_AUTH:
+                sprintf_s(value_str, sizeof(value_str), "%s", g_config_context.config.proxy_auth ? g_config_context.config.proxy_auth : "NULL");
+                break;
+            case OBS_CONFIG_SSL_CIPHER_LIST:
+                sprintf_s(value_str, sizeof(value_str), "%s", g_config_context.config.ssl_cipher_list ? g_config_context.config.ssl_cipher_list : "NULL");
+                break;
+            case OBS_CONFIG_FORBID_REUSE_TCP:
+                sprintf_s(value_str, sizeof(value_str), "%s", g_config_context.config.forbid_reuse_tcp ? "true" : "false");
+                break;
+            case OBS_CONFIG_CURL_MAX_CONNECTS:
+                sprintf_s(value_str, sizeof(value_str), "%d", g_config_context.config.curl_max_connects);
+                break;
+            case OBS_CONFIG_HTTP2_SWITCH:
+                sprintf_s(value_str, sizeof(value_str), "%d", g_config_context.config.http2_switch);
+                break;
+            case OBS_CONFIG_BBR_SWITCH:
+                sprintf_s(value_str, sizeof(value_str), "%d", g_config_context.config.bbr_switch);
+                break;
+            case OBS_CONFIG_AUTH_SWITCH:
+                sprintf_s(value_str, sizeof(value_str), "%d", g_config_context.config.auth_switch);
+                break;
+            case OBS_CONFIG_BUFFER_SIZE:
+                sprintf_s(value_str, sizeof(value_str), "%d", g_config_context.config.buffer_size);
+                break;
+            case OBS_CONFIG_SERVER_CERT_PATH:
+                sprintf_s(value_str, sizeof(value_str), "%s", g_config_context.config.server_cert_path ? g_config_context.config.server_cert_path : "NULL");
+                break;
+            case OBS_CONFIG_CURL_LOG_VERBOSE:
+                sprintf_s(value_str, sizeof(value_str), "%s", g_config_context.config.curl_log_verbose ? "true" : "false");
+                break;
+            case OBS_CONFIG_MUTUAL_SSL_SWITCH:
+                sprintf_s(value_str, sizeof(value_str), "%s", (g_config_context.config.mutual_ssl_switch == OBS_MUTUAL_SSL_OPEN) ? "OPEN" : "CLOSE");
+                break;
+            case OBS_CONFIG_CLIENT_CERT_PATH:
+                sprintf_s(value_str, sizeof(value_str), "%s", g_config_context.config.client_cert_path ? g_config_context.config.client_cert_path : "NULL");
+                break;
+            case OBS_CONFIG_CLIENT_KEY_PATH:
+                sprintf_s(value_str, sizeof(value_str), "%s", g_config_context.config.client_key_path ? g_config_context.config.client_key_path : "NULL");
+                break;
+            case OBS_CONFIG_CLIENT_KEY_PASSWORD:
+                sprintf_s(value_str, sizeof(value_str), "%s", g_config_context.config.client_key_password ? g_config_context.config.client_key_password : "NULL");
+                break;
+            case OBS_CONFIG_GM_MODE_SWITCH:
+                sprintf_s(value_str, sizeof(value_str), "%s", (g_config_context.config.gm_mode_switch == OBS_GM_MODE_OPEN) ? "OPEN" : "CLOSE");
+                break;
+            case OBS_CONFIG_SSL_MIN_VERSION:
+                sprintf_s(value_str, sizeof(value_str), "0x%08lX", (long)g_config_context.config.ssl_min_version);
+                break;
+            case OBS_CONFIG_SSL_MAX_VERSION:
+                sprintf_s(value_str, sizeof(value_str), "0x%08lX", (long)g_config_context.config.ssl_max_version);
+                break;
+            case OBS_CONFIG_OCSP_STAPLING:
+                sprintf_s(value_str, sizeof(value_str), "%s", g_config_context.config.ocsp_stapling ? "true" : "false");
+                break;
+            case OBS_CONFIG_CERTIFICATE_PIN:
+                sprintf_s(value_str, sizeof(value_str), "%s", g_config_context.config.certificate_pin ? g_config_context.config.certificate_pin : "NULL");
+                break;
+            case OBS_CONFIG_CERTIFICATE_PIN_COUNT:
+                sprintf_s(value_str, sizeof(value_str), "%d", g_config_context.config.certificate_pin_count);
+                break;
+            case OBS_CONFIG_VERIFY_HOSTNAME:
+                sprintf_s(value_str, sizeof(value_str), "%s", g_config_context.config.verify_hostname ? "true" : "false");
+                break;
+            case OBS_CONFIG_ENABLE_SESSION_TICKETS:
+                sprintf_s(value_str, sizeof(value_str), "%s", g_config_context.config.enable_session_tickets ? "true" : "false");
+                break;
+            case OBS_CONFIG_SSL_SESSION_CACHE_TIMEOUT:
+                sprintf_s(value_str, sizeof(value_str), "%d", g_config_context.config.ssl_session_cache_timeout);
+                break;
+            default:
+                sprintf_s(value_str, sizeof(value_str), "Unknown");
+        }
+
+        result = sprintf_s(buffer + offset, buffer_size - offset, "  %-30s: %-20s (%s)\n",
+                          config_item_names[i], value_str, source_str);
+        if (result < 0) return -3;
+        offset += result;
+    }
+
+    // 添加验证结果
+    int validation_result = validate_ssl_config(&g_config_context.config);
+    result = sprintf_s(buffer + offset, buffer_size - offset, "\nConfiguration Validation: %s\n",
+                      validation_result == 0 ? "PASSED" : "FAILED");
+    if (result < 0) return -3;
+
+    return 0;
+}
+
+// 保持与旧接口的兼容性
+void load_ssl_config_from_ini(obs_options *options)
+{
+    if (!g_config_context.is_initialized) {
+        config_manager_init();
+    }
+
+    int result = config_manager_load_ini();
+    if (result != 0) {
+        COMMLOG(OBS_LOGWARN, "Failed to load config from ini file");
+    }
+
+    // 将配置复制到 options 结构体
+    memcpy(&options->request_options, &g_config_context.config, sizeof(obs_http_request_option));
+
+    // 加载环境变量配置（保持旧接口的行为）
     load_ssl_config_from_env(options);
 
     // 验证配置
     int validation_result = validate_ssl_config(&options->request_options);
-    if (validation_result != 0)
-    {
-        COMMLOG(OBS_LOGERROR, "%s SSL configuration validation failed with error code: %d", __FUNCTION__, validation_result);
-    }
-    else
-    {
-        COMMLOG(OBS_LOGDEBUG, "%s SSL configuration validation passed", __FUNCTION__);
+    if (validation_result != 0) {
+        COMMLOG(OBS_LOGERROR, "SSL configuration validation failed with error code: %d", validation_result);
+    } else {
+        COMMLOG(OBS_LOGDEBUG, "SSL configuration validation passed");
     }
 }

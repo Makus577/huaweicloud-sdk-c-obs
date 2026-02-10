@@ -24,11 +24,61 @@
  * - 从ini文件加载SSL配置
  * - 从环境变量加载SSL配置
  * - 验证SSL配置的有效性
+ * - 统一的配置接口和优先级管理
  */
 #ifndef SSL_CONFIG_H
 #define SSL_CONFIG_H
 
 #include "eSDKOBS.h"
+
+// 配置项数量
+#define OBS_CONFIG_MAX_ITEMS 25
+
+// 配置项枚举
+typedef enum {
+    OBS_CONFIG_SPEED_LIMIT,
+    OBS_CONFIG_SPEED_TIME,
+    OBS_CONFIG_CONNECT_TIME,
+    OBS_CONFIG_MAX_CONNECTED_TIME,
+    OBS_CONFIG_KEEP_ALIVE,
+    OBS_CONFIG_KEEP_IDLE,
+    OBS_CONFIG_KEEP_INTVL,
+    OBS_CONFIG_PROXY_HOST,
+    OBS_CONFIG_PROXY_AUTH,
+    OBS_CONFIG_SSL_CIPHER_LIST,
+    OBS_CONFIG_FORBID_REUSE_TCP,
+    OBS_CONFIG_CURL_MAX_CONNECTS,
+    OBS_CONFIG_HTTP2_SWITCH,
+    OBS_CONFIG_BBR_SWITCH,
+    OBS_CONFIG_AUTH_SWITCH,
+    OBS_CONFIG_BUFFER_SIZE,
+    OBS_CONFIG_SERVER_CERT_PATH,
+    OBS_CONFIG_CURL_LOG_VERBOSE,
+    OBS_CONFIG_MUTUAL_SSL_SWITCH,
+    OBS_CONFIG_CLIENT_CERT_PATH,
+    OBS_CONFIG_CLIENT_KEY_PATH,
+    OBS_CONFIG_CLIENT_KEY_PASSWORD,
+    OBS_CONFIG_GM_MODE_SWITCH,
+    OBS_CONFIG_SSL_MIN_VERSION,
+    OBS_CONFIG_SSL_MAX_VERSION,
+    OBS_CONFIG_OCSP_STAPLING,
+    OBS_CONFIG_CERTIFICATE_PIN,
+    OBS_CONFIG_CERTIFICATE_PIN_COUNT,
+    OBS_CONFIG_VERIFY_HOSTNAME,
+    OBS_CONFIG_ENABLE_SESSION_TICKETS,
+    OBS_CONFIG_SSL_SESSION_CACHE_TIMEOUT
+} obs_config_item_t;
+
+// 配置来源枚举
+typedef enum {
+    CONFIG_SOURCE_DEFAULT,    // 默认配置
+    CONFIG_SOURCE_INI,        // 配置文件
+    CONFIG_SOURCE_ENV,        // 环境变量
+    CONFIG_SOURCE_API         // API设置
+} config_source_t;
+
+// 配置变更监听回调函数类型
+typedef void (*config_change_callback_t)(obs_config_item_t item, config_source_t source);
 
 /**
  * @brief 初始化HTTP请求配置选项
@@ -165,5 +215,114 @@ void load_ssl_config_from_env(obs_options *options);
  * ```
  */
 int validate_ssl_config(const obs_http_request_option *config);
+
+/**
+ * @brief 初始化配置管理系统
+ *
+ * 初始化全局配置上下文，加载默认配置。
+ */
+void config_manager_init(void);
+
+/**
+ * @brief 销毁配置管理系统
+ *
+ * 释放配置管理系统使用的资源。
+ */
+void config_manager_destroy(void);
+
+/**
+ * @brief 加载完整配置
+ *
+ * 从所有配置来源加载配置，按照优先级合并配置。
+ *
+ * @return int 加载结果：
+ *         0 - 成功
+ *        -1 - 配置文件加载失败
+ *        -2 - 环境变量加载失败
+ *        -3 - 配置验证失败
+ */
+int config_manager_load(void);
+
+/**
+ * @brief 获取配置
+ *
+ * 获取当前配置的副本。
+ *
+ * @param config 指向obs_http_request_option结构体的指针，用于存储配置副本
+ */
+void config_manager_get(obs_http_request_option *config);
+
+/**
+ * @brief 设置配置项
+ *
+ * 设置配置项的值，使用API来源。
+ *
+ * @param item 配置项
+ * @param value 配置值
+ *
+ * @return int 设置结果：
+ *         0 - 成功
+ *        -1 - 无效的配置项
+ *        -2 - 配置值无效
+ */
+int config_manager_set(obs_config_item_t item, const char *value);
+
+/**
+ * @brief 设置整数配置项
+ *
+ * 设置整数类型的配置项的值，使用API来源。
+ *
+ * @param item 配置项
+ * @param value 配置值
+ *
+ * @return int 设置结果：
+ *         0 - 成功
+ *        -1 - 无效的配置项
+ *        -2 - 配置值无效
+ */
+int config_manager_set_int(obs_config_item_t item, int value);
+
+/**
+ * @brief 获取配置项的来源
+ *
+ * 获取配置项的来源，用于调试和问题排查。
+ *
+ * @param item 配置项
+ *
+ * @return config_source_t 配置来源
+ */
+config_source_t config_manager_get_source(obs_config_item_t item);
+
+/**
+ * @brief 注册配置变更监听回调
+ *
+ * 注册一个回调函数，当配置变更时会被调用。
+ *
+ * @param callback 回调函数指针
+ */
+void config_manager_register_callback(config_change_callback_t callback);
+
+/**
+ * @brief 卸载配置变更监听回调
+ *
+ * 卸载已注册的配置变更监听回调。
+ *
+ * @param callback 回调函数指针
+ */
+void config_manager_unregister_callback(config_change_callback_t callback);
+
+/**
+ * @brief 导出配置到字符串
+ *
+ * 将当前配置导出到字符串，用于日志记录和调试。
+ *
+ * @param buffer 输出缓冲区
+ * @param buffer_size 缓冲区大小
+ *
+ * @return int 导出结果：
+ *         0 - 成功
+ *        -1 - 缓冲区大小不足
+ */
+int config_manager_export(char *buffer, int buffer_size);
 
 #endif /* SSL_CONFIG_H */

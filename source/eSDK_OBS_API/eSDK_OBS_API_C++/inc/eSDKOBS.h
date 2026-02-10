@@ -1146,6 +1146,14 @@ typedef struct obs_http_request_option
     obs_gm_mode_switch gm_mode_switch;         // 国密模式开关（OBS_GM_MODE_OPEN/OBS_GM_MODE_CLOSE）
     long ssl_min_version;                      // SSL最小版本（可选，默认TLSv1.2）
     long ssl_max_version;                      // SSL最大版本（可选，默认TLSv1.3）
+
+    // 高级SSL功能
+    bool ocsp_stapling;                      // 是否启用OCSP stapling（默认禁用）
+    char *certificate_pin;                   // 证书锁定（Certificate Pinning）的公钥哈希值
+    int certificate_pin_count;               // 证书锁定哈希值的数量（用于支持多个哈希值）
+    bool verify_hostname;                    // 是否验证主机名（默认启用）
+    bool enable_session_tickets;             // 是否启用SSL会话票证（默认启用）
+    int ssl_session_cache_timeout;           // SSL会话缓存超时时间（秒，默认300秒）
 } obs_http_request_option;
 
 /**
