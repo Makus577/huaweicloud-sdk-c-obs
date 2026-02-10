@@ -48,66 +48,110 @@ static char *trim_string(char *str)
 }
 
 // 辅助函数：解析配置项字符串值
-static void parse_config_string_value(const char *line, char *buffer, size_t buffer_size)
+static int parse_config_string_value(const char *line, char *buffer, size_t buffer_size)
 {
-    char *value = strchr(line, '=');
-    if (value && *(value + 1))
+    if (!line || !buffer || buffer_size == 0)
     {
-        value++;
-        size_t len = strlen(value);
-        if (len > 0 && (value[len - 1] == '\n' || value[len - 1] == '\r'))
-        {
-            value[len - 1] = '\0';
-            len--;
-        }
-        if (len > 0 && len < buffer_size)
-        {
-            char temp_value[MAX_CONFIG_LINE] = {0};
-            strncpy_s(temp_value, sizeof(temp_value), value, len);
-            char *trimmed_value = trim_string(temp_value);
-            errno_t err = strcpy_s(buffer, buffer_size, trimmed_value, strlen(trimmed_value));
-            if (err != EOK)
-            {
-                COMMLOG(OBS_LOGERROR, "%s(%d): strcpy_s failed with error %d!", __FUNCTION__, __LINE__, err);
-            }
-            else if (strlen(buffer) > 0)
-            {
-                COMMLOG(OBS_LOGDEBUG, "%s Parsed config value: %s", __FUNCTION__, buffer);
-            }
-        }
-        else
-        {
-            COMMLOG(OBS_LOGWARN, "%s Config value length %zu exceeds buffer size %zu", __FUNCTION__, len, buffer_size);
-        }
+        COMMLOG(OBS_LOGERROR, "%s Invalid parameters", __FUNCTION__);
+        return -1;
     }
+
+    char *value = strchr(line, '=');
+    if (!value || !*(value + 1))
+    {
+        COMMLOG(OBS_LOGDEBUG, "%s No value found for config line: %s", __FUNCTION__, line);
+        buffer[0] = '\0';
+        return 0;
+    }
+
+    value++;
+    size_t len = strlen(value);
+    if (len > 0 && (value[len - 1] == '\n' || value[len - 1] == '\r'))
+    {
+        value[len - 1] = '\0';
+        len--;
+    }
+
+    if (len == 0)
+    {
+        COMMLOG(OBS_LOGDEBUG, "%s Empty value for config line: %s", __FUNCTION__, line);
+        buffer[0] = '\0';
+        return 0;
+    }
+
+    if (len >= buffer_size)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Config value length %zu exceeds buffer size %zu", __FUNCTION__, len, buffer_size);
+        buffer[0] = '\0';
+        return -2;
+    }
+
+    char temp_value[MAX_CONFIG_LINE] = {0};
+    errno_t err = strncpy_s(temp_value, sizeof(temp_value), value, len);
+    if (err != EOK)
+    {
+        COMMLOG(OBS_LOGERROR, "%s(%d): strncpy_s failed with error %d!", __FUNCTION__, __LINE__, err);
+        buffer[0] = '\0';
+        return -3;
+    }
+
+    char *trimmed_value = trim_string(temp_value);
+    err = strcpy_s(buffer, buffer_size, trimmed_value, strlen(trimmed_value));
+    if (err != EOK)
+    {
+        COMMLOG(OBS_LOGERROR, "%s(%d): strcpy_s failed with error %d!", __FUNCTION__, __LINE__, err);
+        buffer[0] = '\0';
+        return -4;
+    }
+
+    if (strlen(buffer) > 0)
+    {
+        COMMLOG(OBS_LOGDEBUG, "%s Parsed config value: %s", __FUNCTION__, buffer);
+    }
+    else
+    {
+        COMMLOG(OBS_LOGDEBUG, "%s Empty value after trimming for config line: %s", __FUNCTION__, line);
+    }
+
+    return 0;
 }
 
 // 辅助函数：分配并复制字符串
-static void alloc_copy_string(const char *src, char **dest)
+static int alloc_copy_string(const char *src, char **dest)
 {
-    if (src && src[0] != '\0')
+    if (!dest)
     {
-        size_t len = strlen(src);
-        *dest = (char *)malloc(len + 1);
-        if (*dest)
-        {
-            errno_t err = strcpy_s(*dest, len + 1, src, len);
-            if (err != EOK)
-            {
-                COMMLOG(OBS_LOGERROR, "%s(%d): strcpy_s failed with error %d!", __FUNCTION__, __LINE__, err);
-                free(*dest);
-                *dest = NULL;
-            }
-            else
-            {
-                COMMLOG(OBS_LOGINFO, "%s Allocated and copied string: %s", __FUNCTION__, src);
-            }
-        }
-        else
-        {
-            COMMLOG(OBS_LOGERROR, "%s Failed to allocate memory for string: %s", __FUNCTION__, src);
-        }
+        COMMLOG(OBS_LOGERROR, "%s Destination pointer is NULL", __FUNCTION__);
+        return -1;
     }
+
+    *dest = NULL;
+
+    if (!src || src[0] == '\0')
+    {
+        COMMLOG(OBS_LOGDEBUG, "%s Source string is NULL or empty", __FUNCTION__);
+        return 0;
+    }
+
+    size_t len = strlen(src);
+    *dest = (char *)malloc(len + 1);
+    if (!*dest)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to allocate memory for string: %s", __FUNCTION__, src);
+        return -2;
+    }
+
+    errno_t err = strcpy_s(*dest, len + 1, src, len);
+    if (err != EOK)
+    {
+        COMMLOG(OBS_LOGERROR, "%s(%d): strcpy_s failed with error %d!", __FUNCTION__, __LINE__, err);
+        free(*dest);
+        *dest = NULL;
+        return -3;
+    }
+
+    COMMLOG(OBS_LOGINFO, "%s Allocated and copied string: %s", __FUNCTION__, src);
+    return 0;
 }
 
 // 辅助函数：解析SSL版本
@@ -152,33 +196,35 @@ static int validate_ssl_config(const obs_http_request_option *config)
         return -1;
     }
 
+    int validation_result = 0;
+
     // 验证双向认证配置
     if (config->mutual_ssl_switch == OBS_MUTUAL_SSL_OPEN)
     {
         if (!config->client_cert_path || strlen(config->client_cert_path) == 0)
         {
             COMMLOG(OBS_LOGERROR, "%s Mutual SSL enabled but client certificate path not specified", __FUNCTION__);
-            return -2;
+            validation_result = -2;
         }
-
-        if (!config->client_key_path || strlen(config->client_key_path) == 0)
+        else if (!config->client_key_path || strlen(config->client_key_path) == 0)
         {
             COMMLOG(OBS_LOGERROR, "%s Mutual SSL enabled but client key path not specified", __FUNCTION__);
-            return -3;
+            validation_result = -3;
         }
-
-        // 检查证书文件是否存在且可读
-        if (access(config->client_cert_path, R_OK) != 0)
+        else
         {
-            COMMLOG(OBS_LOGERROR, "%s Client certificate file not found or unreadable: %s", __FUNCTION__, config->client_cert_path);
-            return -4;
-        }
-
-        // 检查密钥文件是否存在且可读
-        if (access(config->client_key_path, R_OK) != 0)
-        {
-            COMMLOG(OBS_LOGERROR, "%s Client key file not found or unreadable: %s", __FUNCTION__, config->client_key_path);
-            return -5;
+            // 检查证书文件是否存在且可读
+            if (access(config->client_cert_path, R_OK) != 0)
+            {
+                COMMLOG(OBS_LOGERROR, "%s Client certificate file not found or unreadable: %s", __FUNCTION__, config->client_cert_path);
+                validation_result = -4;
+            }
+            // 检查密钥文件是否存在且可读
+            else if (access(config->client_key_path, R_OK) != 0)
+            {
+                COMMLOG(OBS_LOGERROR, "%s Client key file not found or unreadable: %s", __FUNCTION__, config->client_key_path);
+                validation_result = -5;
+            }
         }
     }
 
@@ -186,10 +232,10 @@ static int validate_ssl_config(const obs_http_request_option *config)
     if (config->gm_mode_switch == OBS_GM_MODE_OPEN)
     {
         // 国密模式建议使用TLSv1.2
-        if (config->ssl_min_version > CURL_SSLVERSION_TLSv1_2 ||
-            config->ssl_max_version < CURL_SSLVERSION_TLSv1_2)
+        if (config->ssl_min_version > CURL_SSLVERSION_TLSv1_2 || config->ssl_max_version < CURL_SSLVERSION_TLSv1_2)
         {
             COMMLOG(OBS_LOGWARN, "%s GM mode is enabled but SSL version range %ld to %ld is not compatible", __FUNCTION__, config->ssl_min_version, config->ssl_max_version);
+            // 可以选择是否返回错误，这里作为警告处理
         }
 
         // 验证国密模式下的SSL密码套件配置
@@ -199,6 +245,7 @@ static int validate_ssl_config(const obs_http_request_option *config)
             if (strstr(config->ssl_cipher_list, "SM") == NULL && strstr(config->ssl_cipher_list, "sm") == NULL)
             {
                 COMMLOG(OBS_LOGWARN, "%s GM mode is enabled but cipher list does not contain SM algorithms: %s", __FUNCTION__, config->ssl_cipher_list);
+                // 可以选择是否返回错误，这里作为警告处理
             }
         }
     }
@@ -207,7 +254,7 @@ static int validate_ssl_config(const obs_http_request_option *config)
     if (config->ssl_min_version > config->ssl_max_version)
     {
         COMMLOG(OBS_LOGERROR, "%s SSL minimum version (%ld) is greater than maximum version (%ld)", __FUNCTION__, config->ssl_min_version, config->ssl_max_version);
-        return -6;
+        validation_result = -6;
     }
 
     // 验证服务器证书路径（如果提供）
@@ -216,11 +263,22 @@ static int validate_ssl_config(const obs_http_request_option *config)
         if (access(config->server_cert_path, R_OK) != 0)
         {
             COMMLOG(OBS_LOGERROR, "%s Server certificate file not found or unreadable: %s", __FUNCTION__, config->server_cert_path);
-            return -7;
+            validation_result = -7;
         }
     }
 
-    return 0;
+    // 输出验证结果详细信息
+    if (validation_result != 0)
+    {
+        COMMLOG(OBS_LOGDEBUG, "%s SSL configuration validation failed with error code: %d", __FUNCTION__, validation_result);
+        // 可以添加更详细的错误信息，根据错误代码
+    }
+    else
+    {
+        COMMLOG(OBS_LOGDEBUG, "%s SSL configuration validation passed", __FUNCTION__);
+    }
+
+    return validation_result;
 }
 
 // 从环境变量加载SSL配置
@@ -245,19 +303,31 @@ static void load_ssl_config_from_env(obs_options *options)
     const char *client_cert_env = getenv("OBS_CLIENT_CERT_PATH");
     if (client_cert_env)
     {
-        alloc_copy_string(client_cert_env, &options->request_options.client_cert_path);
+        int result = alloc_copy_string(client_cert_env, &options->request_options.client_cert_path);
+        if (result != 0)
+        {
+            COMMLOG(OBS_LOGERROR, "%s Failed to copy client certificate path from environment variable, error code: %d", __FUNCTION__, result);
+        }
     }
 
     const char *client_key_env = getenv("OBS_CLIENT_KEY_PATH");
     if (client_key_env)
     {
-        alloc_copy_string(client_key_env, &options->request_options.client_key_path);
+        int result = alloc_copy_string(client_key_env, &options->request_options.client_key_path);
+        if (result != 0)
+        {
+            COMMLOG(OBS_LOGERROR, "%s Failed to copy client key path from environment variable, error code: %d", __FUNCTION__, result);
+        }
     }
 
     const char *client_key_pass_env = getenv("OBS_CLIENT_KEY_PASSWORD");
     if (client_key_pass_env)
     {
-        alloc_copy_string(client_key_pass_env, &options->request_options.client_key_password);
+        int result = alloc_copy_string(client_key_pass_env, &options->request_options.client_key_password);
+        if (result != 0)
+        {
+            COMMLOG(OBS_LOGERROR, "%s Failed to copy client key password from environment variable, error code: %d", __FUNCTION__, result);
+        }
     }
 
     // 国密模式配置
@@ -279,7 +349,11 @@ static void load_ssl_config_from_env(obs_options *options)
     const char *ssl_cipher_env = getenv("OBS_SSL_CIPHER_LIST");
     if (ssl_cipher_env)
     {
-        alloc_copy_string(ssl_cipher_env, &options->request_options.ssl_cipher_list);
+        int result = alloc_copy_string(ssl_cipher_env, &options->request_options.ssl_cipher_list);
+        if (result != 0)
+        {
+            COMMLOG(OBS_LOGERROR, "%s Failed to copy SSL cipher list from environment variable, error code: %d", __FUNCTION__, result);
+        }
     }
 
     // SSL版本配置
@@ -346,6 +420,91 @@ static int file_exists(const char *filename)
         fclose(fp);
         return 1;
     }
+    return 0;
+}
+
+// 验证配置文件内容格式的有效性
+static int validate_config_file_format(FILE *fp)
+{
+    if (!fp)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Invalid file pointer", __FUNCTION__);
+        return -1;
+    }
+
+    int has_ssl_config_section = 0;
+    char line[MAX_CONFIG_LINE] = {0};
+    int line_number = 0;
+
+    // 重置文件指针到开头
+    if (fseek(fp, 0L, SEEK_SET) != 0)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to rewind config file", __FUNCTION__);
+        return -2;
+    }
+
+    while (fgets(line, sizeof(line), fp))
+    {
+        line_number++;
+
+        // 跳过空行和注释
+        if (line[0] == '\n' || line[0] == '#' || line[0] == ';' || line[0] == '\r')
+        {
+            continue;
+        }
+
+        // 检测 [SSLConfig] 段
+        if (strstr(line, "[SSLConfig]"))
+        {
+            has_ssl_config_section = 1;
+            COMMLOG(OBS_LOGDEBUG, "%s Found SSLConfig section at line %d", __FUNCTION__, line_number);
+            continue;
+        }
+
+        // 在SSL配置段内，验证配置项格式
+        if (has_ssl_config_section)
+        {
+            // 检查是否开始了新的配置段
+            if (line[0] == '[')
+            {
+                break;
+            }
+
+            // 验证配置项格式是否正确（key=value）
+            if (strchr(line, '=') == NULL)
+            {
+                COMMLOG(OBS_LOGWARN, "%s Invalid config line format at line %d: %s", __FUNCTION__, line_number, line);
+                continue;  // 继续处理其他配置项，而不是停止解析
+            }
+
+            // 简单验证配置项名称是否符合预期
+            char *key = strtok(line, "=");
+            if (key)
+            {
+                char *trimmed_key = trim_string(key);
+
+                // 检查配置项名称是否有效（包含禁止的字符）
+                if (strpbrk(trimmed_key, "[]{}()!@#$%^&*`~") != NULL)
+                {
+                    COMMLOG(OBS_LOGWARN, "%s Invalid config key name at line %d: %s", __FUNCTION__, line_number, trimmed_key);
+                }
+            }
+        }
+    }
+
+    // 重置文件指针到开头，以便后续读取
+    if (fseek(fp, 0L, SEEK_SET) != 0)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to rewind config file", __FUNCTION__);
+        return -3;
+    }
+
+    if (!has_ssl_config_section)
+    {
+        COMMLOG(OBS_LOGWARN, "%s SSLConfig section not found in config file", __FUNCTION__);
+        return 0;  // 配置文件可能是有效的，但没有SSL配置段
+    }
+
     return 0;
 }
 
@@ -433,6 +592,17 @@ void load_ssl_config_from_ini(obs_options *options)
         return;
     }
 
+    // 验证配置文件格式的有效性
+    int format_validity = validate_config_file_format(fp);
+    if (format_validity < 0)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to validate config file format, error code: %d", __FUNCTION__, format_validity);
+        fclose(fp);
+        free(config_path);
+        load_ssl_config_from_env(options);
+        return;
+    }
+
     COMMLOG(OBS_LOGINFO, "%s Loading SSL configuration from: %s", __FUNCTION__, config_path);
 
     char line[MAX_CONFIG_LINE] = {0};
@@ -478,43 +648,99 @@ void load_ssl_config_from_ini(obs_options *options)
         // 解析配置项
         if (strstr(line, "MutualSSLEnabled"))
         {
-            parse_config_string_value(line, mutual_ssl_str, sizeof(mutual_ssl_str));
-            COMMLOG(OBS_LOGDEBUG, "%s Parsed MutualSSLEnabled: %s", __FUNCTION__, mutual_ssl_str);
+            int result = parse_config_string_value(line, mutual_ssl_str, sizeof(mutual_ssl_str));
+            if (result == 0)
+            {
+                COMMLOG(OBS_LOGDEBUG, "%s Parsed MutualSSLEnabled: %s", __FUNCTION__, mutual_ssl_str);
+            }
+            else
+            {
+                COMMLOG(OBS_LOGERROR, "%s Failed to parse MutualSSLEnabled, error code: %d", __FUNCTION__, result);
+            }
         }
         else if (strstr(line, "ClientCertPath"))
         {
-            parse_config_string_value(line, client_cert_path, sizeof(client_cert_path));
-            COMMLOG(OBS_LOGDEBUG, "%s Parsed ClientCertPath: %s", __FUNCTION__, client_cert_path);
+            int result = parse_config_string_value(line, client_cert_path, sizeof(client_cert_path));
+            if (result == 0)
+            {
+                COMMLOG(OBS_LOGDEBUG, "%s Parsed ClientCertPath: %s", __FUNCTION__, client_cert_path);
+            }
+            else
+            {
+                COMMLOG(OBS_LOGERROR, "%s Failed to parse ClientCertPath, error code: %d", __FUNCTION__, result);
+            }
         }
         else if (strstr(line, "ClientKeyPath"))
         {
-            parse_config_string_value(line, client_key_path, sizeof(client_key_path));
-            COMMLOG(OBS_LOGDEBUG, "%s Parsed ClientKeyPath: %s", __FUNCTION__, client_key_path);
+            int result = parse_config_string_value(line, client_key_path, sizeof(client_key_path));
+            if (result == 0)
+            {
+                COMMLOG(OBS_LOGDEBUG, "%s Parsed ClientKeyPath: %s", __FUNCTION__, client_key_path);
+            }
+            else
+            {
+                COMMLOG(OBS_LOGERROR, "%s Failed to parse ClientKeyPath, error code: %d", __FUNCTION__, result);
+            }
         }
         else if (strstr(line, "ClientKeyPassword"))
         {
-            parse_config_string_value(line, client_key_password, sizeof(client_key_password));
-            COMMLOG(OBS_LOGDEBUG, "%s Parsed ClientKeyPassword: %s", __FUNCTION__, client_key_password);
+            int result = parse_config_string_value(line, client_key_password, sizeof(client_key_password));
+            if (result == 0)
+            {
+                COMMLOG(OBS_LOGDEBUG, "%s Parsed ClientKeyPassword: %s", __FUNCTION__, client_key_password);
+            }
+            else
+            {
+                COMMLOG(OBS_LOGERROR, "%s Failed to parse ClientKeyPassword, error code: %d", __FUNCTION__, result);
+            }
         }
         else if (strstr(line, "GMModeEnabled"))
         {
-            parse_config_string_value(line, gm_mode_str, sizeof(gm_mode_str));
-            COMMLOG(OBS_LOGDEBUG, "%s Parsed GMModeEnabled: %s", __FUNCTION__, gm_mode_str);
+            int result = parse_config_string_value(line, gm_mode_str, sizeof(gm_mode_str));
+            if (result == 0)
+            {
+                COMMLOG(OBS_LOGDEBUG, "%s Parsed GMModeEnabled: %s", __FUNCTION__, gm_mode_str);
+            }
+            else
+            {
+                COMMLOG(OBS_LOGERROR, "%s Failed to parse GMModeEnabled, error code: %d", __FUNCTION__, result);
+            }
         }
         else if (strstr(line, "CipherList"))
         {
-            parse_config_string_value(line, ssl_cipher_list, sizeof(ssl_cipher_list));
-            COMMLOG(OBS_LOGDEBUG, "%s Parsed CipherList: %s", __FUNCTION__, ssl_cipher_list);
+            int result = parse_config_string_value(line, ssl_cipher_list, sizeof(ssl_cipher_list));
+            if (result == 0)
+            {
+                COMMLOG(OBS_LOGDEBUG, "%s Parsed CipherList: %s", __FUNCTION__, ssl_cipher_list);
+            }
+            else
+            {
+                COMMLOG(OBS_LOGERROR, "%s Failed to parse CipherList, error code: %d", __FUNCTION__, result);
+            }
         }
         else if (strstr(line, "SSLMinVersion"))
         {
-            parse_config_string_value(line, ssl_min_ver_str, sizeof(ssl_min_ver_str));
-            COMMLOG(OBS_LOGDEBUG, "%s Parsed SSLMinVersion: %s", __FUNCTION__, ssl_min_ver_str);
+            int result = parse_config_string_value(line, ssl_min_ver_str, sizeof(ssl_min_ver_str));
+            if (result == 0)
+            {
+                COMMLOG(OBS_LOGDEBUG, "%s Parsed SSLMinVersion: %s", __FUNCTION__, ssl_min_ver_str);
+            }
+            else
+            {
+                COMMLOG(OBS_LOGERROR, "%s Failed to parse SSLMinVersion, error code: %d", __FUNCTION__, result);
+            }
         }
         else if (strstr(line, "SSLMaxVersion"))
         {
-            parse_config_string_value(line, ssl_max_ver_str, sizeof(ssl_max_ver_str));
-            COMMLOG(OBS_LOGDEBUG, "%s Parsed SSLMaxVersion: %s", __FUNCTION__, ssl_max_ver_str);
+            int result = parse_config_string_value(line, ssl_max_ver_str, sizeof(ssl_max_ver_str));
+            if (result == 0)
+            {
+                COMMLOG(OBS_LOGDEBUG, "%s Parsed SSLMaxVersion: %s", __FUNCTION__, ssl_max_ver_str);
+            }
+            else
+            {
+                COMMLOG(OBS_LOGERROR, "%s Failed to parse SSLMaxVersion, error code: %d", __FUNCTION__, result);
+            }
         }
     }
 
@@ -533,9 +759,23 @@ void load_ssl_config_from_ini(obs_options *options)
         COMMLOG(OBS_LOGINFO, "%s Mutual SSL disabled from config", __FUNCTION__);
     }
 
-    alloc_copy_string(client_cert_path, &options->request_options.client_cert_path);
-    alloc_copy_string(client_key_path, &options->request_options.client_key_path);
-    alloc_copy_string(client_key_password, &options->request_options.client_key_password);
+    int result = alloc_copy_string(client_cert_path, &options->request_options.client_cert_path);
+    if (result != 0)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to copy client certificate path, error code: %d", __FUNCTION__, result);
+    }
+
+    result = alloc_copy_string(client_key_path, &options->request_options.client_key_path);
+    if (result != 0)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to copy client key path, error code: %d", __FUNCTION__, result);
+    }
+
+    result = alloc_copy_string(client_key_password, &options->request_options.client_key_password);
+    if (result != 0)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to copy client key password, error code: %d", __FUNCTION__, result);
+    }
 
     // 应用国密模式配置
     if (strcmp(gm_mode_str, "true") == 0)
@@ -549,7 +789,11 @@ void load_ssl_config_from_ini(obs_options *options)
         COMMLOG(OBS_LOGINFO, "%s GM mode disabled from config", __FUNCTION__);
     }
 
-    alloc_copy_string(ssl_cipher_list, &options->request_options.ssl_cipher_list);
+    int result = alloc_copy_string(ssl_cipher_list, &options->request_options.ssl_cipher_list);
+    if (result != 0)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to copy SSL cipher list, error code: %d", __FUNCTION__, result);
+    }
 
     // 应用SSL版本配置
     parse_ssl_version(ssl_min_ver_str, &options->request_options.ssl_min_version, CURL_SSLVERSION_TLSv1_2);

@@ -36,12 +36,14 @@ int API_STACK_SIZE = 100;
 static char userAgentG[256];
 static uint32_t requestStackCountG  = 0;
 static uint32_t current_request_cnt = 0;
-obs_openssl_switch g_switch_openssl =OBS_OPENSSL_CLOSE; 
+obs_openssl_switch g_switch_openssl =OBS_OPENSSL_CLOSE;
 obs_http_request_option *obs_default_http_request_option = NULL;
-uint32_t request_online_max = 1000;    
+uint32_t request_online_max = 1000;
 http_request *requestStackG[REQUEST_STACK_SIZE] = {0};
 int use_api_index = -1;
 obs_s3_switch *api_switch=NULL;
+
+static CURLSH *g_curl_share = NULL;
 
 #if defined __GNUC__ || defined LINUX
 #include <unistd.h>
@@ -106,6 +108,13 @@ void request_api_deinitialize(void)
         kill_locks();
     }
 
+    // 清理CURL共享对象
+    if (g_curl_share)
+    {
+        curl_share_cleanup(g_curl_share);
+        g_curl_share = NULL;
+    }
+
     while (requestStackCountG--) {
         request_destroy(requestStackG[requestStackCountG]);
     }
@@ -122,6 +131,24 @@ obs_status request_api_initialize_global(unsigned int flags)
 		!= CURLE_OK)
 	{
 		return OBS_STATUS_InternalError;
+	}
+
+	// 创建CURL共享对象，用于实现SSL会话重用和连接池管理
+	g_curl_share = curl_share_init();
+	if (g_curl_share)
+	{
+		// 设置共享选项：SSL会话、DNS缓存和连接池
+		curl_share_setopt(g_curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_SSL_SESSION);
+		curl_share_setopt(g_curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
+		curl_share_setopt(g_curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
+
+		// 设置共享对象的锁函数（可选，默认使用内部实现）
+		// curl_share_setopt(g_curl_share, CURLSHOPT_LOCKFUNC, lock_function);
+		// curl_share_setopt(g_curl_share, CURLSHOPT_UNLOCKFUNC, unlock_function);
+	}
+	else
+	{
+		COMMLOG(OBS_LOGWARN, "%s Failed to initialize CURL share object", __FUNCTION__);
 	}
 
 	if (OBS_OPENSSL_CLOSE == g_switch_openssl)
@@ -662,6 +689,12 @@ static obs_status setup_curl(http_request *request,
 {
     CURLcode status = CURLE_OK;
     curl_easy_setopt_safe(CURLOPT_PRIVATE, request);
+
+    // 使用CURL共享对象，实现SSL会话重用和连接池管理
+    if (g_curl_share)
+    {
+        curl_easy_setopt_safe(CURLOPT_SHARE, g_curl_share);
+    }
     curl_easy_setopt_safe(CURLOPT_HEADERDATA, request);
     curl_easy_setopt_safe(CURLOPT_HEADERFUNCTION, &curl_header_func);
     curl_easy_setopt_safe(CURLOPT_READFUNCTION, &curl_read_func);

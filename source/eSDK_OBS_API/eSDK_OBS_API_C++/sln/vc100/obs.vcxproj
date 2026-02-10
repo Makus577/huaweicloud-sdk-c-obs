@@ -121,6 +121,7 @@
     <ClCompile Include="..\..\src\truncate_object.c" />
     <ClCompile Include="..\..\src\util.c" />
     <ClCompile Include="..\..\src\request_util.c" />
+    <ClCompile Include="..\..\src\obs_sm_crypto.c" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{AB9FFBA6-F5BF-4F12-8B33-A4D2F9975F32}</ProjectGuid>

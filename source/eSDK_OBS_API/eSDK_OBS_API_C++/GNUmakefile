@@ -297,7 +297,7 @@ libeSDKOBS: $(LIBOBS_SHARED) $(LIBOBS_STATIC)
 
 LIBOBS_SOURCES := bucket.c  object.c request.c request_context.c \
                  response_headers_handler.c simplexml.c util.c log.c \
-				 request_util.c general.c error_parser.c
+				 request_util.c general.c error_parser.c obs_sm_crypto.c
 
 $(LIBOBS_SHARED): $(LIBOBS_SOURCES:%.c=$(BUILD)/obj/%.do)
 	$(QUIET_ECHO) $@: Building shared library

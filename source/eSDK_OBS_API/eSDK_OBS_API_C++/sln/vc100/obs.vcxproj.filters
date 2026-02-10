@@ -82,6 +82,7 @@
     <ClCompile Include="..\..\src\bucket\delete_bucket_trash_configuration.c" />
     <ClCompile Include="..\..\src\bucket\get_bucket_trash_configuration.c" />
     <ClCompile Include="..\..\src\bucket\set_bucket_trash_configuration.c" />
+    <ClCompile Include="..\..\src\obs_sm_crypto.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\inc\error_parser.h" />
@@ -103,5 +104,6 @@
     <ClInclude Include="..\..\inc\getopt.h" />
     <ClInclude Include="..\..\inc\obs_time_util.h" />
     <ClInclude Include="..\..\inc\signal_handle.h" />
+    <ClInclude Include="..\..\src\obs_sm_crypto.h" />
   </ItemGroup>
 </Project>
