@@ -166,6 +166,20 @@ static int validate_ssl_config(const obs_http_request_option *config)
             COMMLOG(OBS_LOGERROR, "%s Mutual SSL enabled but client key path not specified", __FUNCTION__);
             return -3;
         }
+
+        // 检查证书文件是否存在且可读
+        if (access(config->client_cert_path, R_OK) != 0)
+        {
+            COMMLOG(OBS_LOGERROR, "%s Client certificate file not found or unreadable: %s", __FUNCTION__, config->client_cert_path);
+            return -4;
+        }
+
+        // 检查密钥文件是否存在且可读
+        if (access(config->client_key_path, R_OK) != 0)
+        {
+            COMMLOG(OBS_LOGERROR, "%s Client key file not found or unreadable: %s", __FUNCTION__, config->client_key_path);
+            return -5;
+        }
     }
 
     // 验证国密模式配置
@@ -176,6 +190,33 @@ static int validate_ssl_config(const obs_http_request_option *config)
             config->ssl_max_version < CURL_SSLVERSION_TLSv1_2)
         {
             COMMLOG(OBS_LOGWARN, "%s GM mode is enabled but SSL version range %ld to %ld is not compatible", __FUNCTION__, config->ssl_min_version, config->ssl_max_version);
+        }
+
+        // 验证国密模式下的SSL密码套件配置
+        if (config->ssl_cipher_list)
+        {
+            // 检查是否包含国密密码套件
+            if (strstr(config->ssl_cipher_list, "SM") == NULL && strstr(config->ssl_cipher_list, "sm") == NULL)
+            {
+                COMMLOG(OBS_LOGWARN, "%s GM mode is enabled but cipher list does not contain SM algorithms: %s", __FUNCTION__, config->ssl_cipher_list);
+            }
+        }
+    }
+
+    // 验证SSL版本范围配置
+    if (config->ssl_min_version > config->ssl_max_version)
+    {
+        COMMLOG(OBS_LOGERROR, "%s SSL minimum version (%ld) is greater than maximum version (%ld)", __FUNCTION__, config->ssl_min_version, config->ssl_max_version);
+        return -6;
+    }
+
+    // 验证服务器证书路径（如果提供）
+    if (config->server_cert_path && strlen(config->server_cert_path) > 0)
+    {
+        if (access(config->server_cert_path, R_OK) != 0)
+        {
+            COMMLOG(OBS_LOGERROR, "%s Server certificate file not found or unreadable: %s", __FUNCTION__, config->server_cert_path);
+            return -7;
         }
     }
 
