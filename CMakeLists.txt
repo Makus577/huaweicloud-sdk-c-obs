@@ -41,6 +41,7 @@ set(LIBXML2_VERSION libxml2-2.9.9)
 set(PCRE_VERSION pcre-8.45)
 set(ICONV_VERSION iconv-1.15)
 set(CJSON_VERSION cjson-1.7.18)
+set(SPDLOG_VERSION spdlog-1.12.0)
 
 
 
