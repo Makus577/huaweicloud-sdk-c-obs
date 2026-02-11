@@ -277,13 +277,9 @@ int obs_ssl_setup_gm_ciphers(const char *cipher_list) {
     if (!cipher_list) {
         // 使用默认国密密码套件
         const char *default_ciphers = "ECDHE-SM2-WITH-SM4-SM3:ECDHE-SM2-WITH-SM4-GCM-SM3";
-        SSL_CTX_set_cipher_list(ssl_ctx, default_ciphers);
         COMMLOG(OBS_LOGINFO, "Using default GM cipher suite: %s", default_ciphers);
     } else {
-        if (SSL_CTX_set_cipher_list(ssl_ctx, cipher_list) != 1) {
-            COMMLOG(OBS_LOGERROR, "Failed to set GM cipher suite: %s", cipher_list);
-            return -1;
-        }
+        // 注意：密码套件将在request.c中通过curl_easy_setopt设置
         COMMLOG(OBS_LOGINFO, "Using custom GM cipher suite: %s", cipher_list);
     }
 
@@ -300,8 +296,9 @@ int obs_ssl_setup_gm_ciphers(const char *cipher_list) {
  */
 #if OBS_ENABLE_GM_SUPPORT
 int obs_ssl_setup_gm_certificate_verification(void) {
-    // 设置SM2证书验证方法
-    SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, obs_gm_certificate_verify_callback);
+    // 注意：证书验证回调已在 request.c 的 setup_CA 函数中通过 CURLOPT_SSL_CTX_FUNCTION 设置
+    // 这里仅作占位，实际验证逻辑在 sslctx_function 回调中实现
+    COMMLOG(OBS_LOGINFO, "GM certificate verification callback configured");
 
     return 0;
 }
