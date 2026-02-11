@@ -43,7 +43,8 @@ http_request *requestStackG[REQUEST_STACK_SIZE] = {0};
 int use_api_index = -1;
 obs_s3_switch *api_switch=NULL;
 
-static CURLSH *g_curl_share = NULL;
+// 已删除：CURL会话复用功能（g_curl_share）
+// 原因：简化代码，移除高级SSL与会话管理功能
 
 #if defined __GNUC__ || defined LINUX
 #include <unistd.h>
@@ -108,12 +109,7 @@ void request_api_deinitialize(void)
         kill_locks();
     }
 
-    // 清理CURL共享对象
-    if (g_curl_share)
-    {
-        curl_share_cleanup(g_curl_share);
-        g_curl_share = NULL;
-    }
+    // 已删除：清理CURL共享对象（会话复用功能）
 
     while (requestStackCountG--) {
         request_destroy(requestStackG[requestStackCountG]);
@@ -133,23 +129,7 @@ obs_status request_api_initialize_global(unsigned int flags)
 		return OBS_STATUS_InternalError;
 	}
 
-	// 创建CURL共享对象，用于实现SSL会话重用和连接池管理
-	g_curl_share = curl_share_init();
-	if (g_curl_share)
-	{
-		// 设置共享选项：SSL会话、DNS缓存和连接池
-		curl_share_setopt(g_curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_SSL_SESSION);
-		curl_share_setopt(g_curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
-		curl_share_setopt(g_curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
-
-		// 设置共享对象的锁函数（可选，默认使用内部实现）
-		// curl_share_setopt(g_curl_share, CURLSHOPT_LOCKFUNC, lock_function);
-		// curl_share_setopt(g_curl_share, CURLSHOPT_UNLOCKFUNC, unlock_function);
-	}
-	else
-	{
-		COMMLOG(OBS_LOGWARN, "%s Failed to initialize CURL share object", __FUNCTION__);
-	}
+	// 已删除：创建CURL共享对象（会话复用功能）
 
 	if (OBS_OPENSSL_CLOSE == g_switch_openssl)
 	{
@@ -690,11 +670,8 @@ static obs_status setup_curl(http_request *request,
     CURLcode status = CURLE_OK;
     curl_easy_setopt_safe(CURLOPT_PRIVATE, request);
 
-    // 使用CURL共享对象，实现SSL会话重用和连接池管理
-    if (g_curl_share)
-    {
-        curl_easy_setopt_safe(CURLOPT_SHARE, g_curl_share);
-    }
+    // 已删除：使用CURL共享对象（会话复用功能）
+
     curl_easy_setopt_safe(CURLOPT_HEADERDATA, request);
     curl_easy_setopt_safe(CURLOPT_HEADERFUNCTION, &curl_header_func);
     curl_easy_setopt_safe(CURLOPT_READFUNCTION, &curl_read_func);
