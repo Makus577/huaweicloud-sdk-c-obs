@@ -9,6 +9,30 @@ A C SDK for interacting with Huawei Cloud Object Storage Service, with support f
 
 ## Build Commands
 
+### Official Linux Build Scripts (Recommended)
+
+For x86_64:
+```bash
+cd source/eSDK_OBS_API/eSDK_OBS_API_C++
+export SPDLOG_VERSION=spdlog-1.12.0
+bash build.sh sdk
+```
+
+For ARM (aarch64):
+```bash
+cd source/eSDK_OBS_API/eSDK_OBS_API_C++
+export SPDLOG_VERSION=spdlog-1.12.0
+bash build_aarch.sh sdk
+```
+
+**Script parameters**: `build.sh <package_name> [release|debug]`
+- Default build type is `release`
+- Output: A tarball named `<package_name>.tgz` containing demo code, include files, and lib files
+
+**Other available scripts**:
+- `build_macos.sh` - For macOS
+- `build_ndk_aarch64.sh` - For Android NDK
+
 ### Standard Build (CMake)
 ```bash
 # Clean build directory
