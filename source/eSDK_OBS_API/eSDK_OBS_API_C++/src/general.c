@@ -260,8 +260,7 @@ void init_obs_options(obs_options *options)
 	options->bucket_options.useCname = false;
     options->temp_auth = NULL;
 
-    // 加载 SSL 配置文件
-    load_ssl_config_from_ini(options);
+    // SSL配置（双向认证和国密）现在通过API设置，不再从配置文件加载
 
 #if OBS_ENABLE_GM_SUPPORT
     // 如果启用了国密模式，检查支持性

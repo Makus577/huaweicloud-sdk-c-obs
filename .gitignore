@@ -5,3 +5,5 @@
 /source/eSDK_OBS_API/eSDK_OBS_API_C++/build/vc100/Debug/obs
 /source/eSDK_OBS_API/eSDK_OBS_API_C++/build/vc100/Debug
 .claude/settings.local.json
+build/CMakeFiles/
+build_*

@@ -126,64 +126,68 @@ typedef void (*config_change_callback_t)(obs_config_item_t item, config_source_t
 void init_http_request_option(obs_http_request_option *options);
 
 /**
- * @brief 从配置文件加载SSL配置
+ * @brief 从配置文件加载SSL配置（已弃用）
  *
- * 从OBS.ini配置文件中加载SSL相关配置，包括双向认证和国密模式配置。
+ * @warning 此函数已弃用，保留仅用于向后兼容。
  *
- * @param options 指向obs_options结构体的指针，配置将加载到该结构体中
+ * 出于安全考虑，SSL配置（特别是双向认证、国密模式等包含敏感信息的配置）
+ * 现在仅通过API设置，不再从配置文件加载。
  *
- * @note 配置文件的格式如下：
- * ```ini
- * [SSLConfig]
- * MutualSSLEnabled=true
- * ClientCertPath=/path/to/client.crt
- * ClientKeyPath=/path/to/client.key
- * ClientKeyPassword=password
- * GMModeEnabled=true
- * CipherList=ECDHE-SM2-WITH-SM4-SM3:ECDHE-SM2-WITH-SM4-GCM-SM3
- * SSLMinVersion=1.2
- * SSLMaxVersion=1.2
- * ```
+ * @param options 指向obs_options结构体的指针（未使用）
  *
- * @note 如果配置文件不存在或无法读取，函数会尝试从环境变量加载配置。
+ * @note 建议使用 config_manager API 来管理配置：
+ *       - config_manager_init() - 初始化配置管理器
+ *       - config_manager_set() - 通过API设置配置
+ *       - config_manager_get() - 获取配置
+ *       - config_manager_destroy() - 销毁配置管理器
+ *
+ * @note 如需从配置文件加载非SSL配置，请直接使用 config_manager API。
  *
  * 示例：
  * ```c
- * obs_options options;
- * // 初始化options结构体
- * load_ssl_config_from_ini(&options);
+ * // 不推荐：已弃用的方式
+ * // load_ssl_config_from_ini(&options);
+ *
+ * // 推荐方式：使用 config_manager API
+ * obs_http_request_option options;
+ * init_http_request_option(&options);
+ * options.mutual_ssl_switch = OBS_MUTUAL_SSL_OPEN;
+ * options.client_cert_path = "/path/to/client.crt";
+ * options.client_key_path = "/path/to/client.key";
  * ```
  */
 void load_ssl_config_from_ini(obs_options *options);
 
 /**
- * @brief 从环境变量加载SSL配置
+ * @brief 从环境变量加载SSL配置（已弃用）
  *
- * 从环境变量中加载SSL相关配置，包括双向认证和国密模式配置。
+ * @warning 此函数已弃用，保留仅用于向后兼容。
  *
- * @param options 指向obs_options结构体的指针，配置将加载到该结构体中
+ * 出于安全考虑，SSL配置（特别是双向认证、国密模式等包含敏感信息的配置）
+ * 现在仅通过API设置，不再从环境变量加载。
  *
- * @note 支持的环境变量如下：
- * - OBS_MUTUAL_SSL_ENABLED：是否启用双向认证（true/false或1/0）
- * - OBS_CLIENT_CERT_PATH：客户端证书路径
- * - OBS_CLIENT_KEY_PATH：客户端私钥路径
- * - OBS_CLIENT_KEY_PASSWORD：客户端私钥密码
- * - OBS_GM_MODE_ENABLED：是否启用国密模式（true/false或1/0）
- * - OBS_SSL_CIPHER_LIST：SSL密码套件列表
- * - OBS_SSL_MIN_VERSION：SSL最小版本（1.0/1.1/1.2/1.3）
- * - OBS_SSL_MAX_VERSION：SSL最大版本（1.0/1.1/1.2/1.3）
+ * @param options 指向obs_options结构体的指针（未使用）
  *
- * @note 环境变量配置的优先级高于配置文件。
+ * @note 建议使用 config_manager API 来管理配置：
+ *       - config_manager_init() - 初始化配置管理器
+ *       - config_manager_set() - 通过API设置配置
+ *       - config_manager_get() - 获取配置
+ *       - config_manager_destroy() - 销毁配置管理器
+ *
+ * @note 如需从环境变量加载非SSL配置，请直接使用 config_manager API。
  *
  * 示例：
  * ```c
- * // 在代码中设置环境变量（通常在程序外部设置）
- * setenv("OBS_MUTUAL_SSL_ENABLED", "true", 1);
- * setenv("OBS_CLIENT_CERT_PATH", "/path/to/client.crt", 1);
- * setenv("OBS_CLIENT_KEY_PATH", "/path/to/client.key", 1);
+ * // 不推荐：已弃用的方式
+ * // setenv("OBS_MUTUAL_SSL_ENABLED", "true", 1);
+ * // load_ssl_config_from_env(&options);
  *
- * obs_options options;
- * load_ssl_config_from_env(&options);
+ * // 推荐方式：使用 config_manager API
+ * obs_http_request_option options;
+ * init_http_request_option(&options);
+ * options.mutual_ssl_switch = OBS_MUTUAL_SSL_OPEN;
+ * options.client_cert_path = "/path/to/client.crt";
+ * options.client_key_path = "/path/to/client.key";
  * ```
  */
 void load_ssl_config_from_env(obs_options *options);
