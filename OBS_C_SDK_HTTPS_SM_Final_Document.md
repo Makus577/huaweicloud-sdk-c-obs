@@ -935,13 +935,160 @@ void load_ssl_config_from_env(obs_options *options)
 }
 ```
 
-## 13. 风险评估和缓解策略
+## 13. 国密架构设计分析：Tongsuo耦合问题
 
-### 13.1 风险1：算法库兼容性
+### 13.1 问题背景
+
+当前C SDK的国密功能强依赖Tongsuo库，原因如下：
+1. Tongsuo是目前最成熟的国密（SM2/SM3/SM4）开源实现
+2. libcurl需要底层SSL库支持国密算法
+3. 因此需要使用Tongsuo版本的libcurl
+
+### 13.2 当前耦合情况
+
+#### 构建层面耦合
+```cmake
+# CMakeLists.txt 中硬编码
+set(TONGSUO_VERSION tongsuo-8.3.0)
+set(OPENSSL_INC_DIR ${PROJECT_SOURCE_DIR}/build/script/Provider/build/${LINKARCH}/${TONGSUO_VERSION}/include)
+set(OPENSSL_LIB_DIR ${PROJECT_SOURCE_DIR}/build/script/Provider/build/${LINKARCH}/${TONGSUO_VERSION}/lib)
+```
+
+#### 代码层面耦合
+```c
+// ssl_gm_config.c:114 - 检查Tongsuo特定算法
+if (!SSL_CTX_has_cipher(ssl_ctx, "ECDHE-SM2-WITH-SM4-SM3")) {
+    COMMLOG(OBS_LOGERROR, "Tongsuo SSL library not detected");
+    return -2;
+}
+
+// obs_sm_crypto.c:140 - 检测Tongsuo版本字符串
+if (str strm(version, "Tongsuo") != NULL) {
+    sscanf(strstr(version, "Tongsuo"), "Tongsuo %d.%d.%d", &major, &minor, &patch);
+}
+```
+
+### 13.3 强耦合方案评估
+
+| 维度 | 优点 | 缺点 |
+|------|------|------|
+| **实现复杂度** | 实现依赖简单，代码复杂度低 | - |
+| **成熟度** | Tongsuo是最成熟的国密开源实现 | - |
+| **安全性** | 避免自行实现国密的安全风险 | - |
+| **部署** | - | 部署时必须安装Tongsuo |
+| **长期维护** | - | 无法利用OpenSSL 3.0+的国密支持 |
+| **技术锁定** | - | 长期存在技术锁定风险 |
+
+### 13.4 建议的解耦方案
+
+#### 短期建议：保持当前方案
+- **理由**：Tongsuo是目前国密生态的主流选择，OpenSSL 3.0+的国密支持尚不完善
+- **行动**：保持现有实现，加强版本兼容性检测
+
+#### 长期建议：实现后端抽象层
+```
+                    ┌─────────────────┐
+                    │  obs_sm_crypto  │
+                    │   (抽象层)      │
+                    └────────┬────────┘
+                             │
+                ┌────────────┴────────────┐
+                │                         │
+         ┌──────▼──────┐         ┌──────▼──────┐
+         │  Tongsuo   │         │  OpenSSL    │
+         │  Backend   │         │  Backend    │
+         │  (现有)    │         │  (未来)     │
+         └─────────────┘         └─────────────┘
+```
+
+#### 抽象层设计
+```c
+// obs_sm_crypto_backend.h - 国密后端抽象接口
+typedef struct {
+    const char *name;
+    int (*init)(void);
+    int (*sm2_sign)(/* 参数 */);
+    int (*sm2_verify)(/* 参数 */);
+    int (*sm3_hash)(/* 参数 */);
+    int (*sm4_encrypt)(/* 参数 */);
+    int (*sm4_decrypt)(/* 参数 */);
+    void (*cleanup)(void);
+} sm_crypto_backend_t;
+
+// Tongsuo后端实现
+sm_crypto_backend_t* tongsuo_backend_create(void);
+
+// OpenSSL 3.0+后端实现（未来）
+sm_crypto_backend_t* openssl_backend_create(void);
+```
+
+#### 构建系统优化
+```cmake
+# 自动检测可用的国密支持
+find_package(Tongsuo QUIET)
+find_package(OpenSSL 3.0 QUIET)
+
+if(Tongsuo_FOUND)
+    set(GM_BACKEND "tongsuo")
+    message(STATUS "Using Tongsuo backend for SM crypto")
+elseif(OPENSSL_FOUND)
+    # 检查 OpenSSL 是否支持国密
+    include(CheckCSourceCompiles)
+    check_c_source_compiles("
+        #include <openssl/evp.h>
+        int main() {
+            const EVP_MD *md = EVP_sm3();
+            return (md == NULL) ? 1 : 0;
+        }
+    " SM_SUPPORTED)
+    if(SM_SUPPORTED)
+        set(GM_BACKEND "openssl")
+        message(STATUS "Using OpenSSL 3.0+ backend for SM crypto")
+    endif()
+endif()
+
+if(NOT DEFINED GM_BACKEND)
+    message(WARNING "No GM crypto backend found, SM support disabled")
+    set(ENABLE_GM_SUPPORT OFF)
+endif()
+
+# 条件编译
+if(GM_BACKEND STREQUAL "tongsuo")
+    add_definitions(-DUSE_TONGSUO_BACKEND)
+    target_sources(eSDKOBS PRIVATE src/sm_crypto_tongsuo.c)
+elseif(GM_BACKEND STREQUAL "openssl")
+    add_definitions(-DUSE_OPENSSL_BACKEND)
+    target_sources(eSDKOBS PRIVATE src/sm_crypto_openssl.c)
+endif()
+```
+
+### 13.5 迁移路线图
+
+1. **第一阶段（当前）**：保持Tongsuo强耦合，完善现有功能
+2. **第二阶段（3-6个月）**：设计并实现抽象层，保持Tongsuo作为唯一后端
+3. **第三阶段（6-12个月）**：当OpenSSL 3.0+国密支持成熟时，添加OpenSSL后端
+4. **第四阶段（12个月+）**：支持运行时后端切换，通过配置选择后端
+
+### 13.6 结论
+
+**当前强耦合方案在短期是合理且实用的**，主要原因：
+1. Tongsuo是国密生态的事实标准
+2. OpenSSL 3.0+的国密支持尚未成熟
+3. 避免过早优化的技术债务
+
+**长期应实现后端抽象层**，以：
+1. 保持技术灵活性
+2. 降低对特定库的依赖风险
+3. 支持未来可能的其他国密实现
+
+## 14. 风险评估和缓解策略
+
+### 14.1 风险1：算法库兼容性
 
 - **风险**：不同Tongsuo版本可能有API差异
 - **缓解**：添加版本检测，使用条件编译
 - **解决方案**：提供最小版本要求和兼容性矩阵
+- **长期方案**：实现国密后端抽象层，支持多种实现
 
 ### 13.2 风险2：性能影响
 

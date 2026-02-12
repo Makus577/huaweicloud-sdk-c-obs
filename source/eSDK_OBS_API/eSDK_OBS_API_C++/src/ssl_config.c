@@ -245,9 +245,9 @@ static int config_set_internal(obs_config_item_t item, const char *value, config
     g_config_context.source_map[item] = source;
     COMMLOG(OBS_LOGINFO, "Config item %s set from %s source: %s",
             config_item_names[item],
-            (source == CONFIG_SOURCE_DEFAULT ? "default" :
-             source == CONFIG_SOURCE_INI ? "ini file" :
-             source == CONFIG_SOURCE_ENV ? "environment" : "API"),
+            (source == CONFIG_SOURCE_DEFAULT ? "默认配置" :
+             source == CONFIG_SOURCE_INI ? "配置文件" :
+             source == CONFIG_SOURCE_ENV ? "环境变量" : "API设置"),
             value);
 
     // 触发配置变更回调
@@ -613,9 +613,10 @@ int validate_ssl_config(const obs_http_request_option *config)
 }
 
 
-// 从环境变量加载SSL配置
+// 从环境变量加载SSL配置（已弃用）
 // 注意：SSL配置（双向认证和国密）现在仅通过API设置，不再从环境变量加载。
 // 该函数保留以保持接口兼容性，但不执行任何操作。
+// 警告：出于安全考虑，敏感配置不应从环境变量加载。
 void load_ssl_config_from_env(obs_options *options)
 {
     // SSL配置（双向认证和国密）现在仅通过API设置，不再从环境变量加载
@@ -893,10 +894,13 @@ void config_manager_destroy(void)
 }
 
 /**
- * @brief 从配置文件加载配置
+ * @brief 从配置文件加载配置（已弃用）
  *
- * 注意：SSL配置（双向认证和国密）现在通过API设置，不再从配置文件加载。
- * 该函数保留以支持其他可能的配置项（如有需要可扩展）。
+ * 注意：此函数保留仅用于向后兼容。出于安全考虑，SSL配置
+ * （特别是双向认证、国密模式等包含敏感信息的配置）
+ * 现在仅通过API设置，不再从配置文件加载。
+ *
+ * 该函数保留以支持其他可能的非SSL配置项（如有需要可扩展）。
  */
 static int config_manager_load_ini(void)
 {
@@ -907,10 +911,13 @@ static int config_manager_load_ini(void)
 
 
 /**
- * @brief 从环境变量加载配置
+ * @brief 从环境变量加载配置（已弃用）
  *
- * 注意：SSL配置（双向认证和国密）现在仅通过API设置，不再从环境变量加载。
- * 该函数保留以支持其他可能的配置项（如有需要可扩展）。
+ * 注意：此函数保留仅用于向后兼容。出于安全考虑，SSL配置
+ * （特别是双向认证、国密模式等包含敏感信息的配置）
+ * 现在仅通过API设置，不再从环境变量加载。
+ *
+ * 该函数保留以支持其他可能的非SSL配置项（如有需要可扩展）。
  */
 static int config_manager_load_env(void)
 {
@@ -1100,16 +1107,16 @@ int config_manager_export(char *buffer, int buffer_size)
         const char *source_str;
         switch (g_config_context.source_map[i]) {
             case CONFIG_SOURCE_DEFAULT:
-                source_str = "Default";
+                source_str = "默认配置";
                 break;
             case CONFIG_SOURCE_INI:
-                source_str = "INI File";
+                source_str = "配置文件";
                 break;
             case CONFIG_SOURCE_ENV:
-                source_str = "Environment";
+                source_str = "环境变量";
                 break;
             case CONFIG_SOURCE_API:
-                source_str = "API";
+                source_str = "API设置";
                 break;
             default:
                 source_str = "Unknown";
@@ -1231,9 +1238,10 @@ int config_manager_export(char *buffer, int buffer_size)
     return 0;
 }
 
-// 保持与旧接口的兼容性
+// 保持与旧接口的兼容性（已弃用）
 // 注意：SSL配置（双向认证和国密）现在仅通过API设置，不再从配置文件或环境变量加载。
 // 该函数保留以保持接口兼容性，不执行任何操作。
+// 警告：出于安全考虑，敏感配置不应从配置文件加载。
 void load_ssl_config_from_ini(obs_options *options)
 {
     // SSL配置（双向认证和国密）现在仅通过API设置，不再从配置文件或环境变量加载

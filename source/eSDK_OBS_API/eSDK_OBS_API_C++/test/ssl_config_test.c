@@ -305,8 +305,7 @@ void test_mutual_ssl_mode_switching(void)
     memset(&opts, 0, sizeof(obs_options));
 
     // 模拟从关闭到启用
-
-opts.request_options.mutual_ssl_switch = OBS_MUTUAL_SSL_CLOSE;
+    opts.request_options.mutual_ssl_switch = OBS_MUTUAL_SSL_CLOSE;
     TEST_ASSERT_EQ(0, opts.request_options.mutual_ssl_switch, "Start with mutual SSL closed");
 
     // 启用双向SSL
