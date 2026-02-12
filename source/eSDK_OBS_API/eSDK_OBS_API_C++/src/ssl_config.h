@@ -30,6 +30,7 @@
 #define SSL_CONFIG_H
 
 #include "eSDKOBS.h"
+#include <unistd.h>
 
 // 配置项数量
 #if OBS_ENABLE_GM_SUPPORT

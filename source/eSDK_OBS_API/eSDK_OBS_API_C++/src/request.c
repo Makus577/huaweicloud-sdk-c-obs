@@ -24,6 +24,9 @@
 #include "pcre.h"
 #include <openssl/ssl.h>
 #include "eSDKOBS.h"
+#if OBS_ENABLE_GM_SUPPORT
+#include "ssl_gm_config.h"
+#endif
 #if defined __GNUC__ || defined LINUX
 #include <sys/utsname.h>
 #include <pthread.h>
@@ -68,6 +71,53 @@ static int sockopt_callback(const void *clientp, curl_socket_t curlfd, curlsockt
     setsockopt(curlfd, SOL_SOCKET, SO_RCVBUF, (const char *)&val, sizeof(val));
     return CURL_SOCKOPT_OK;
 }
+
+#if OBS_ENABLE_GM_SUPPORT
+/**
+ * @brief 国密SSL上下文回调函数
+ *
+ * 在SSL上下文创建时调用，用于配置国密SSL参数。
+ */
+static CURLcode gm_sslctx_function(CURL *curl, const void *sslctx, void *user_data)
+{
+    (void)curl;
+    SSL_CTX *ctx = (SSL_CTX *)sslctx;
+    const request_params *params = (const request_params *)user_data;
+
+    if (!ctx || !params) {
+        COMMLOG(OBS_LOGERROR, "%s Invalid parameters: ctx=%p, params=%p", __FUNCTION__, ctx, params);
+        return CURLE_SSL_CONNECT_ERROR;
+    }
+
+    // 配置国密密码套件
+    const char *cipher_list = params->request_option.ssl_cipher_list
+        ? params->request_option.ssl_cipher_list
+        : "ECDHE-SM2-WITH-SM4-SM3:ECDHE-SM2-WITH-SM4-GCM-SM3";
+
+    if (obs_ssl_gm_configure_ciphers(ctx, cipher_list) != 0) {
+        COMMLOG(OBS_LOGERROR, "%s Failed to configure GM ciphers", __FUNCTION__);
+        return CURLE_SSL_CONNECT_ERROR;
+    }
+
+    // 配置国密证书验证
+    if (obs_ssl_gm_configure_verification(ctx) != 0) {
+        COMMLOG(OBS_LOGERROR, "%s Failed to configure GM verification", __FUNCTION__);
+        return CURLE_SSL_CONNECT_ERROR;
+    }
+
+    // 配置双向认证（如果启用）
+    if (params->request_option.mutual_ssl_switch == OBS_MUTUAL_SSL_OPEN) {
+        if (obs_ssl_gm_configure_context(ctx, &params->request_option) != 0) {
+            COMMLOG(OBS_LOGERROR, "%s Failed to configure GM mutual auth", __FUNCTION__);
+            return CURLE_SSL_CONNECT_ERROR;
+        }
+        COMMLOG(OBS_LOGINFO, "%s GM mutual SSL configured", __FUNCTION__);
+    }
+
+    COMMLOG(OBS_LOGINFO, "%s GM SSL context configured with cipher: %s", __FUNCTION__, cipher_list);
+    return CURLE_OK;
+}
+#endif
 
 static void request_deinitialize(http_request *request)
 {
@@ -521,8 +571,26 @@ obs_status setup_CA(http_request *request,
         COMMLOG(OBS_LOGINFO, "%s Mutual SSL authentication enabled", __FUNCTION__);
     }
 
-    // SSL套件和版本配置
+    // SSL套件和版本配置 - 国密模式
+#if OBS_ENABLE_GM_SUPPORT
     if (params->request_option.gm_mode_switch == OBS_GM_MODE_OPEN) {
+        // 初始化国密支持
+        if (obs_ssl_gm_config_init() != 0) {
+            COMMLOG(OBS_LOGERROR, "%s Failed to initialize GM support", __FUNCTION__);
+            return OBS_STATUS_InternalError;
+        }
+
+        // 检查国密支持是否可用
+        if (!obs_ssl_gm_is_supported()) {
+            COMMLOG(OBS_LOGERROR, "%s GM mode: enabled but GM not supported", __FUNCTION__);
+            return OBS_STATUS_InternalError;
+        }
+
+        // 使用自定义SSL上下文回调函数
+        curl_easy_setopt_safe(CURLOPT_SSL_CTX_FUNCTION, &gm_sslctx_function);
+        curl_easy_setopt_safe(CURLOPT_SSL_CTX_DATA, (void *)params);
+
+        // 设置默认的国密密码套件（通过SSL上下文回调设置）
         const char *gm_cipher_default = "ECDHE-SM2-WITH-SM4-SM3:ECDHE-SM2-WITH-SM4-GCM-SM3";
         const char *cipher_list = params->request_option.ssl_cipher_list ?
                                   params->request_option.ssl_cipher_list : gm_cipher_default;
@@ -533,14 +601,19 @@ obs_status setup_CA(http_request *request,
             return OBS_STATUS_InternalError;
         }
 
-        status = curl_easy_setopt(request->curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
+        status = curl_easy_setopt(request->curl, CURLOPT_SSL_VERSION, CURL_SSLVERSION_TLSv1_2);
         if (status != CURLE_OK) {
             COMMLOG(OBS_LOGERROR, "%s Failed to set GM SSL version: %s", __FUNCTION__, curl_easy_strerror(status));
             return OBS_STATUS_InternalError;
         }
 
-        COMMLOG(OBS_LOGINFO, "%s GM mode enabled with cipher: %s", __FUNCTION__, cipher_list);
-    } else {
+        COMMLOG(OBS_LOGINFO, "%s GM mode: enabled with cipher: %s (using custom SSL callback)", __FUNCTION__, cipher_list);
+        return OBS_STATUS_OK;
+    }
+#endif
+
+    // 标准SSL配置
+    {
         const char *std_cipher_default = "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:"
                                          "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256";
         const char *cipher_list = params->request_option.ssl_cipher_list ?
@@ -576,11 +649,13 @@ obs_status setup_CA(http_request *request,
             return OBS_STATUS_InternalError;
         }
 
+#ifdef CURLOPT_SSLVERSION_MAX
         status = curl_easy_setopt(request->curl, CURLOPT_SSLVERSION_MAX, max_ver);
         if (status != CURLE_OK) {
             COMMLOG(OBS_LOGERROR, "%s Failed to set SSL max version: %s", __FUNCTION__, curl_easy_strerror(status));
             return OBS_STATUS_InternalError;
         }
+#endif
 
         // 记录SSL版本信息
         char ssl_ver_str[64] = {0};

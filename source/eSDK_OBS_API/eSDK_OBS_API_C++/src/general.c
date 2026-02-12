@@ -22,7 +22,10 @@
 #include "securec.h"
 #include <libxml/parser.h>
 #include <curl/curl.h>
-#include <openssl/md5.h> 
+#include <openssl/md5.h>
+#include <openssl/evp.h>
+#include <openssl/ec.h>
+#include <openssl/obj_mac.h>
 #include "common.h"
 
 #if defined __GNUC__ || defined LINUX
@@ -259,6 +262,35 @@ void init_obs_options(obs_options *options)
 
     // 加载 SSL 配置文件
     load_ssl_config_from_ini(options);
+
+#if OBS_ENABLE_GM_SUPPORT
+    // 如果启用了国密模式，检查支持性
+    if (options->request_options.gm_mode_switch == OBS_GM_MODE_OPEN) {
+        // 检查国密支持是否可用
+        int gm_supported = 0;
+        const EVP_MD *sm3_md = EVP_get_digestbyname("sm3");
+        const EVP_CIPHER *sm4_cipher = EVP_get_cipherbyname("sm4-cbc");
+        const EC_GROUP *sm2_group = EC_GROUP_new_by_curve_name(NID_sm2);
+
+        if (sm3_md && sm4_cipher && sm2_group) {
+            gm_supported = 1;
+            COMMLOG(OBS_LOGINFO, "GM mode supported and enabled");
+        } else {
+            COMMLOG(OBS_LOGWARN, "GM mode enabled but not supported (SM3 %s, SM4 %s, SM2 %s), disabling",
+                    __FUNCTION__,
+                    sm3_md ? "available" : "not available",
+                    sm4_cipher ? "available" : "not available",
+                    sm2_group ? "available" : "not available");
+            options->request_options.gm_mode_switch = OBS_GM_MODE_CLOSE;
+        }
+
+        if (sm2_group) {
+            EC_GROUP_free((EC_GROUP *)sm2_group);
+        }
+    } else {
+        COMMLOG(OBS_LOGDEBUG, "GM mode disabled, skipping support check");
+    }
+#endif
 }
 
 obs_status init_certificate_set_path(obs_certificate_conf ca_conf, char *ca_path,

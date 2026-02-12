@@ -19,17 +19,10 @@
 #include "securec.h"
 #include <stdlib.h>
 #include <ctype.h>
+#include <unistd.h>
 
 #define MAX_CONFIG_LINE 256
 #define CONFIG_FILE "OBS.ini"
-
-// 配置来源枚举
-typedef enum {
-    CONFIG_SOURCE_DEFAULT,    // 默认配置
-    CONFIG_SOURCE_INI,        // 配置文件
-    CONFIG_SOURCE_ENV,        // 环境变量
-    CONFIG_SOURCE_API         // API设置
-} config_source_t;
 
 // 配置项定义
 typedef struct {
@@ -38,6 +31,9 @@ typedef struct {
     int integer_value;        // 整数值
     const char *string_value; // 字符串值
 } config_item_t;
+
+// 辅助函数：解析SSL版本
+static void parse_ssl_version(const char *ver_str, long *dest, long default_value);
 
 // 配置上下文
 typedef struct {
@@ -300,7 +296,9 @@ static void config_manager_init_default(void)
     g_config_context.config.client_cert_path = NULL;
     g_config_context.config.client_key_path = NULL;
     g_config_context.config.client_key_password = NULL;
+#if OBS_ENABLE_GM_SUPPORT
     g_config_context.config.gm_mode_switch = OBS_GM_MODE_CLOSE;
+#endif
     g_config_context.config.ssl_min_version = CURL_SSLVERSION_TLSv1_2;
     g_config_context.config.ssl_max_version = (1 << 16) | 3; // TLSv1.3
 
@@ -404,7 +402,7 @@ static int parse_config_string_value(const char *line, char *buffer, size_t buff
     }
 
     char *trimmed_value = trim_string(temp_value);
-    err = strcpy_s(buffer, buffer_size, trimmed_value, strlen(trimmed_value));
+    err = strcpy_s(buffer, buffer_size, trimmed_value);
     if (err != EOK)
     {
         COMMLOG(OBS_LOGERROR, "%s(%d): strcpy_s failed with error %d!", __FUNCTION__, __LINE__, err);
@@ -449,7 +447,7 @@ static int alloc_copy_string(const char *src, char **dest)
         return -2;
     }
 
-    errno_t err = strcpy_s(*dest, len + 1, src, len);
+    errno_t err = strcpy_s(*dest, len + 1, src);
     if (err != EOK)
     {
         COMMLOG(OBS_LOGERROR, "%s(%d): strcpy_s failed with error %d!", __FUNCTION__, __LINE__, err);
@@ -496,7 +494,7 @@ static void parse_ssl_version(const char *ver_str, long *dest, long default_valu
 }
 
 // 配置验证函数
-static int validate_ssl_config(const obs_http_request_option *config)
+int validate_ssl_config(const obs_http_request_option *config)
 {
     if (config == NULL)
     {
@@ -537,8 +535,10 @@ static int validate_ssl_config(const obs_http_request_option *config)
     }
 
     // 验证国密模式配置
-    if (config->gm_mode_switch == OBS_GM_MODE_OPEN)
-    {
+#if OBS_ENABLE_GM_SUPPORT
+    if (config->gm_mode_switch == OBS_GM_MODE_OPEN) {
+#endif
+#if OBS_ENABLE_GM_SUPPORT
         // 国密模式建议使用TLSv1.2
         if (config->ssl_min_version > CURL_SSLVERSION_TLSv1_2 || config->ssl_max_version < CURL_SSLVERSION_TLSv1_2)
         {
@@ -557,6 +557,7 @@ static int validate_ssl_config(const obs_http_request_option *config)
             }
         }
     }
+#endif
 
     // 验证SSL版本范围配置
     if (config->ssl_min_version > config->ssl_max_version)
@@ -612,7 +613,7 @@ static int validate_ssl_config(const obs_http_request_option *config)
 }
 
 // 从环境变量加载SSL配置
-static void load_ssl_config_from_env(obs_options *options)
+void load_ssl_config_from_env(obs_options *options)
 {
     // 双向认证配置
     const char *mutual_ssl_env = getenv("OBS_MUTUAL_SSL_ENABLED");
@@ -661,6 +662,7 @@ static void load_ssl_config_from_env(obs_options *options)
     }
 
     // 国密模式配置
+#if OBS_ENABLE_GM_SUPPORT
     const char *gm_mode_env = getenv("OBS_GM_MODE_ENABLED");
     if (gm_mode_env)
     {
@@ -675,6 +677,7 @@ static void load_ssl_config_from_env(obs_options *options)
             COMMLOG(OBS_LOGINFO, "%s GM mode disabled from environment variable", __FUNCTION__);
         }
     }
+#endif
 
     const char *ssl_cipher_env = getenv("OBS_SSL_CIPHER_LIST");
     if (ssl_cipher_env)
@@ -804,7 +807,9 @@ void init_http_request_option(obs_http_request_option *options)
     options->client_cert_path = NULL;
     options->client_key_path = NULL;
     options->client_key_password = NULL;
+#if OBS_ENABLE_GM_SUPPORT
     options->gm_mode_switch = OBS_GM_MODE_CLOSE;
+#endif
     options->ssl_min_version = CURL_SSLVERSION_TLSv1_2;
     options->ssl_max_version = (1 << 16) | 3; // TLSv1.3
 
@@ -1115,6 +1120,7 @@ static int config_manager_load_ini(void)
                 item_index = OBS_CONFIG_CLIENT_KEY_PATH;
             } else if (strcmp(key, "ClientKeyPassword") == 0) {
                 item_index = OBS_CONFIG_CLIENT_KEY_PASSWORD;
+#if OBS_ENABLE_GM_SUPPORT
             } else if (strcmp(key, "GMModeEnabled") == 0) {
                 item_index = OBS_CONFIG_GM_MODE_SWITCH;
                 if (strcmp(value, "true") == 0) {
@@ -1122,6 +1128,7 @@ static int config_manager_load_ini(void)
                 } else if (strcmp(value, "false") == 0) {
                     strcpy_s(value, sizeof(value), "0"); // OBS_GM_MODE_CLOSE
                 }
+#endif
             } else if (strcmp(key, "CipherList") == 0) {
                 item_index = OBS_CONFIG_SSL_CIPHER_LIST;
             } else if (strcmp(key, "SSLMinVersion") == 0) {
@@ -1176,12 +1183,12 @@ static int config_manager_load_ini(void)
  */
 static int config_manager_load_env(void)
 {
+    // 首先加载非国密相关配置
     const char *env_vars[] = {
         "OBS_MUTUAL_SSL_ENABLED",
         "OBS_CLIENT_CERT_PATH",
         "OBS_CLIENT_KEY_PATH",
         "OBS_CLIENT_KEY_PASSWORD",
-        "OBS_GM_MODE_ENABLED",
         "OBS_SSL_CIPHER_LIST",
         "OBS_SSL_MIN_VERSION",
         "OBS_SSL_MAX_VERSION",
@@ -1198,7 +1205,6 @@ static int config_manager_load_env(void)
         OBS_CONFIG_CLIENT_CERT_PATH,
         OBS_CONFIG_CLIENT_KEY_PATH,
         OBS_CONFIG_CLIENT_KEY_PASSWORD,
-        OBS_CONFIG_GM_MODE_SWITCH,
         OBS_CONFIG_SSL_CIPHER_LIST,
         OBS_CONFIG_SSL_MIN_VERSION,
         OBS_CONFIG_SSL_MAX_VERSION,
@@ -1217,7 +1223,7 @@ static int config_manager_load_env(void)
             strncpy_s(value, sizeof(value), env_value, strlen(env_value));
 
             // 处理布尔类型的配置
-            if (i == 0 || i == 4) { // MutualSSLEnabled 或 GMModeEnabled
+            if (i == 0) { // MutualSSLEnabled
                 if (strcmp(env_value, "true") == 0 || strcmp(env_value, "1") == 0) {
                     strcpy_s(value, sizeof(value), "1"); // Open
                 } else if (strcmp(env_value, "false") == 0 || strcmp(env_value, "0") == 0) {
@@ -1228,6 +1234,21 @@ static int config_manager_load_env(void)
             config_set_internal(config_items[i], value, CONFIG_SOURCE_ENV);
         }
     }
+
+#if OBS_ENABLE_GM_SUPPORT
+    // 加载国密模式配置
+    const char *gm_mode_env = getenv("OBS_GM_MODE_ENABLED");
+    if (gm_mode_env) {
+        char value[MAX_CONFIG_LINE] = {0};
+        strncpy_s(value, sizeof(value), gm_mode_env, strlen(gm_mode_env));
+        if (strcmp(gm_mode_env, "true") == 0 || strcmp(gm_mode_env, "1") == 0) {
+            strcpy_s(value, sizeof(value), "1"); // Open
+        } else if (strcmp(gm_mode_env, "false") == 0 || strcmp(gm_mode_env, "0") == 0) {
+            strcpy_s(value, sizeof(value), "0"); // Close
+        }
+        config_set_internal(OBS_CONFIG_GM_MODE_SWITCH, value, CONFIG_SOURCE_ENV);
+    }
+#endif
 
     return 0;
 }
@@ -1243,7 +1264,7 @@ int config_manager_load(void)
     }
 
     int ini_result = config_manager_load_ini();
-    int env_result = config_manager_load_env();
+    config_manager_load_env();
 
     // 验证配置
     int validation_result = validate_ssl_config(&g_config_context.config);
@@ -1495,9 +1516,11 @@ int config_manager_export(char *buffer, int buffer_size)
             case OBS_CONFIG_CLIENT_KEY_PASSWORD:
                 sprintf_s(value_str, sizeof(value_str), "%s", g_config_context.config.client_key_password ? g_config_context.config.client_key_password : "NULL");
                 break;
+#if OBS_ENABLE_GM_SUPPORT
             case OBS_CONFIG_GM_MODE_SWITCH:
                 sprintf_s(value_str, sizeof(value_str), "%s", (g_config_context.config.gm_mode_switch == OBS_GM_MODE_OPEN) ? "OPEN" : "CLOSE");
                 break;
+#endif
             case OBS_CONFIG_SSL_MIN_VERSION:
                 sprintf_s(value_str, sizeof(value_str), "0x%08lX", (long)g_config_context.config.ssl_min_version);
                 break;
