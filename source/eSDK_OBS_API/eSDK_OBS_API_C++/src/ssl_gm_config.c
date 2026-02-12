@@ -29,6 +29,43 @@
 #include <openssl/evp.h>
 #include <openssl/x509.h>
 #include <openssl/ec.h>
+#include <openssl/pem.h>
+#include <string.h>
+
+/**
+ * @brief 私钥密码回调函数
+ *
+ * 当加载加密的私钥时，OpenSSL会调用此回调函数获取密码。
+ *
+ * @param buf 输出缓冲区，用于存储密码
+ * @param size 缓冲区大小
+ * @param rwflag 读写标志（0表示读，1表示写）
+ * @param userdata 用户数据（密码字符串）
+ * @return int 实际写入的密码长度
+ */
+static int pem_password_callback(char *buf, int size, int rwflag, void *userdata)
+{
+    (void)rwflag;  // 未使用，避免编译警告
+
+    if (!userdata) {
+        COMMLOG(OBS_LOGWARN, "Password callback called with NULL userdata");
+        return 0;
+    }
+
+    const char *password = (const char *)userdata;
+    size_t password_len = strlen(password);
+
+    if (password_len >= (size_t)size) {
+        COMMLOG(OBS_LOGERROR, "Password too long for buffer (len=%zu, buf_size=%d)",
+                 password_len, size);
+        return 0;
+    }
+
+    memcpy(buf, password, password_len);
+    COMMLOG(OBS_LOGDEBUG, "Password provided for encrypted private key");
+
+    return (int)password_len;
+}
 
 /**
  * @brief 国密SSL配置初始化
@@ -210,17 +247,34 @@ int obs_ssl_gm_configure_context(SSL_CTX *ssl_ctx, const obs_http_request_option
 
     // 配置双向认证（如果启用）
     if (config->mutual_ssl_switch) {
+        // 如果客户端私钥有密码，设置密码回调函数
+        if (config->client_key_password && strlen(config->client_key_password) > 0) {
+            SSL_CTX_set_default_passwd_cb(ssl_ctx, pem_password_callback);
+            SSL_CTX_set_default_passwd_cb_userdata(ssl_ctx, config->client_key_password);
+            COMMLOG(OBS_LOGINFO, "Private key password callback configured");
+        }
+
         // 加载客户端证书
         if (SSL_CTX_use_certificate_file(ssl_ctx, config->client_cert_path, SSL_FILETYPE_PEM) <= 0) {
-            COMMLOG(OBS_LOGERROR, "Failed to load client certificate: %s", config->client_cert_path);
+            unsigned long err = ERR_get_error();
+            char err_buf[256] = {0};
+            ERR_error_string_n(err, err_buf, sizeof(err_buf));
+            COMMLOG(OBS_LOGERROR, "Failed to load client certificate: %s, error: %s",
+                     config->client_cert_path, err_buf);
             return -2;
         }
+        COMMLOG(OBS_LOGINFO, "Client certificate loaded: %s", config->client_cert_path);
 
         // 加载客户端私钥
         if (SSL_CTX_use_PrivateKey_file(ssl_ctx, config->client_key_path, SSL_FILETYPE_PEM) <= 0) {
-            COMMLOG(OBS_LOGERROR, "Failed to load client private key: %s", config->client_key_path);
+            unsigned long err = ERR_get_error();
+            char err_buf[256] = {0};
+            ERR_error_string_n(err, err_buf, sizeof(err_buf));
+            COMMLOG(OBS_LOGERROR, "Failed to load client private key: %s, error: %s",
+                     config->client_key_path, err_buf);
             return -3;
         }
+        COMMLOG(OBS_LOGINFO, "Client private key loaded: %s", config->client_key_path);
 
         // 检查证书和私钥是否匹配
         if (!SSL_CTX_check_private_key(ssl_ctx)) {

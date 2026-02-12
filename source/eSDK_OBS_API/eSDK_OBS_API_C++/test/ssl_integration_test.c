@@ -191,7 +191,7 @@ void test_mutual_ssl_configuration(void)
         "MIIEpAIBAAKCAQEA... (truncated for test)\n"
         "-----END RSA PRIVATE KEY-----\n";
 
-    int result = create_test-cert_file(test_cert_path, cert_content);
+    int result = create_test_cert_file(test_cert_path, cert_content);
     TEST_ASSERT_EQ(0, result, "Create test client certificate");
 
     result = create_test_cert_file(test_key_path, key_content);

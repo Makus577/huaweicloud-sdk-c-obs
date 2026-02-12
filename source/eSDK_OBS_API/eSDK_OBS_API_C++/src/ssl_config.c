@@ -1,7 +1,7 @@
 /*********************************************************************************
 * Copyright 2024 Huawei Technologies Co.,Ltd.
 * Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-* this file except in compliance with the License.  You may obtain a copy of the
+* this file except in compliance with License.  You may obtain a copy of the
 * License at
 *
 * http://www.apache.org/licenses/LICENSE-2.0
@@ -612,166 +612,17 @@ int validate_ssl_config(const obs_http_request_option *config)
     return validation_result;
 }
 
+
 // 从环境变量加载SSL配置
+// 注意：SSL配置（双向认证和国密）现在仅通过API设置，不再从环境变量加载。
+// 该函数保留以保持接口兼容性，但不执行任何操作。
 void load_ssl_config_from_env(obs_options *options)
 {
-    // 双向认证配置
-    const char *mutual_ssl_env = getenv("OBS_MUTUAL_SSL_ENABLED");
-    if (mutual_ssl_env)
-    {
-        if (strcmp(mutual_ssl_env, "true") == 0 || strcmp(mutual_ssl_env, "1") == 0)
-        {
-            options->request_options.mutual_ssl_switch = OBS_MUTUAL_SSL_OPEN;
-            COMMLOG(OBS_LOGINFO, "%s Mutual SSL enabled from environment variable", __FUNCTION__);
-        }
-        else if (strcmp(mutual_ssl_env, "false") == 0 || strcmp(mutual_ssl_env, "0") == 0)
-        {
-            options->request_options.mutual_ssl_switch = OBS_MUTUAL_SSL_CLOSE;
-            COMMLOG(OBS_LOGINFO, "%s Mutual SSL disabled from environment variable", __FUNCTION__);
-        }
-    }
-
-    const char *client_cert_env = getenv("OBS_CLIENT_CERT_PATH");
-    if (client_cert_env)
-    {
-        int result = alloc_copy_string(client_cert_env, &options->request_options.client_cert_path);
-        if (result != 0)
-        {
-            COMMLOG(OBS_LOGERROR, "%s Failed to copy client certificate path from environment variable, error code: %d", __FUNCTION__, result);
-        }
-    }
-
-    const char *client_key_env = getenv("OBS_CLIENT_KEY_PATH");
-    if (client_key_env)
-    {
-        int result = alloc_copy_string(client_key_env, &options->request_options.client_key_path);
-        if (result != 0)
-        {
-            COMMLOG(OBS_LOGERROR, "%s Failed to copy client key path from environment variable, error code: %d", __FUNCTION__, result);
-        }
-    }
-
-    const char *client_key_pass_env = getenv("OBS_CLIENT_KEY_PASSWORD");
-    if (client_key_pass_env)
-    {
-        int result = alloc_copy_string(client_key_pass_env, &options->request_options.client_key_password);
-        if (result != 0)
-        {
-            COMMLOG(OBS_LOGERROR, "%s Failed to copy client key password from environment variable, error code: %d", __FUNCTION__, result);
-        }
-    }
-
-    // 国密模式配置
-#if OBS_ENABLE_GM_SUPPORT
-    const char *gm_mode_env = getenv("OBS_GM_MODE_ENABLED");
-    if (gm_mode_env)
-    {
-        if (strcmp(gm_mode_env, "true") == 0 || strcmp(gm_mode_env, "1") == 0)
-        {
-            options->request_options.gm_mode_switch = OBS_GM_MODE_OPEN;
-            COMMLOG(OBS_LOGINFO, "%s GM mode enabled from environment variable", __FUNCTION__);
-        }
-        else if (strcmp(gm_mode_env, "false") == 0 || strcmp(gm_mode_env, "0") == 0)
-        {
-            options->request_options.gm_mode_switch = OBS_GM_MODE_CLOSE;
-            COMMLOG(OBS_LOGINFO, "%s GM mode disabled from environment variable", __FUNCTION__);
-        }
-    }
-#endif
-
-    const char *ssl_cipher_env = getenv("OBS_SSL_CIPHER_LIST");
-    if (ssl_cipher_env)
-    {
-        int result = alloc_copy_string(ssl_cipher_env, &options->request_options.ssl_cipher_list);
-        if (result != 0)
-        {
-            COMMLOG(OBS_LOGERROR, "%s Failed to copy SSL cipher list from environment variable, error code: %d", __FUNCTION__, result);
-        }
-    }
-
-    // SSL版本配置
-    const char *ssl_min_ver_env = getenv("OBS_SSL_MIN_VERSION");
-    if (ssl_min_ver_env)
-    {
-        parse_ssl_version(ssl_min_ver_env, &options->request_options.ssl_min_version, CURL_SSLVERSION_TLSv1_2);
-    }
-
-    const char *ssl_max_ver_env = getenv("OBS_SSL_MAX_VERSION");
-    if (ssl_max_ver_env)
-    {
-        parse_ssl_version(ssl_max_ver_env, &options->request_options.ssl_max_version, (1 << 16) | 3);
-    }
-
-    // 高级SSL功能配置
-    const char *ocsp_stapling_env = getenv("OBS_OCSP_STAPLING");
-    if (ocsp_stapling_env)
-    {
-        if (strcmp(ocsp_stapling_env, "true") == 0 || strcmp(ocsp_stapling_env, "1") == 0)
-        {
-            options->request_options.ocsp_stapling = true;
-            COMMLOG(OBS_LOGINFO, "%s OCSP stapling enabled from environment variable", __FUNCTION__);
-        }
-        else if (strcmp(ocsp_stapling_env, "false") == 0 || strcmp(ocsp_stapling_env, "0") == 0)
-        {
-            options->request_options.ocsp_stapling = false;
-            COMMLOG(OBS_LOGINFO, "%s OCSP stapling disabled from environment variable", __FUNCTION__);
-        }
-    }
-
-    const char *certificate_pin_env = getenv("OBS_CERTIFICATE_PIN");
-    if (certificate_pin_env)
-    {
-        int result = alloc_copy_string(certificate_pin_env, &options->request_options.certificate_pin);
-        if (result != 0)
-        {
-            COMMLOG(OBS_LOGERROR, "%s Failed to copy certificate pin from environment variable, error code: %d", __FUNCTION__, result);
-        }
-    }
-
-    const char *certificate_pin_count_env = getenv("OBS_CERTIFICATE_PIN_COUNT");
-    if (certificate_pin_count_env)
-    {
-        options->request_options.certificate_pin_count = atoi(certificate_pin_count_env);
-        COMMLOG(OBS_LOGINFO, "%s Certificate pin count set from environment variable: %d", __FUNCTION__, options->request_options.certificate_pin_count);
-    }
-
-    const char *verify_hostname_env = getenv("OBS_VERIFY_HOSTNAME");
-    if (verify_hostname_env)
-    {
-        if (strcmp(verify_hostname_env, "true") == 0 || strcmp(verify_hostname_env, "1") == 0)
-        {
-            options->request_options.verify_hostname = true;
-            COMMLOG(OBS_LOGINFO, "%s Hostname verification enabled from environment variable", __FUNCTION__);
-        }
-        else if (strcmp(verify_hostname_env, "false") == 0 || strcmp(verify_hostname_env, "0") == 0)
-        {
-            options->request_options.verify_hostname = false;
-            COMMLOG(OBS_LOGINFO, "%s Hostname verification disabled from environment variable", __FUNCTION__);
-        }
-    }
-
-    const char *enable_session_tickets_env = getenv("OBS_ENABLE_SESSION_TICKETS");
-    if (enable_session_tickets_env)
-    {
-        if (strcmp(enable_session_tickets_env, "true") == 0 || strcmp(enable_session_tickets_env, "1") == 0)
-        {
-            options->request_options.enable_session_tickets = true;
-            COMMLOG(OBS_LOGINFO, "%s SSL session tickets enabled from environment variable", __FUNCTION__);
-        }
-        else if (strcmp(enable_session_tickets_env, "false") == 0 || strcmp(enable_session_tickets_env, "0") == 0)
-        {
-            options->request_options.enable_session_tickets = false;
-            COMMLOG(OBS_LOGINFO, "%s SSL session tickets disabled from environment variable", __FUNCTION__);
-        }
-    }
-
-    const char *ssl_session_cache_timeout_env = getenv("OBS_SSL_SESSION_CACHE_TIMEOUT");
-    if (ssl_session_cache_timeout_env)
-    {
-        options->request_options.ssl_session_cache_timeout = atoi(ssl_session_cache_timeout_env);
-        COMMLOG(OBS_LOGINFO, "%s SSL session cache timeout set from environment variable: %d seconds", __FUNCTION__, options->request_options.ssl_session_cache_timeout);
-    }
+    // SSL配置（双向认证和国密）现在仅通过API设置，不再从环境变量加载
+    COMMLOG(OBS_LOGDEBUG, "SSL configuration loading from environment variables is disabled");
+    (void)options; // 避免未使用参数警告
 }
+
 
 // 初始化HTTP请求配置选项
 void init_http_request_option(obs_http_request_option *options)
@@ -1043,215 +894,31 @@ void config_manager_destroy(void)
 
 /**
  * @brief 从配置文件加载配置
+ *
+ * 注意：SSL配置（双向认证和国密）现在通过API设置，不再从配置文件加载。
+ * 该函数保留以支持其他可能的配置项（如有需要可扩展）。
  */
 static int config_manager_load_ini(void)
 {
-    char *config_path = get_config_file_path();
-    if (!config_path) {
-        COMMLOG(OBS_LOGWARN, "Config file not found in any standard locations");
-        return -1;
-    }
-
-    FILE *fp = fopen(config_path, "r");
-    if (!fp) {
-        COMMLOG(OBS_LOGERROR, "Failed to open config file: %s", config_path);
-        free(config_path);
-        return -2;
-    }
-
-    int format_validity = validate_config_file_format(fp);
-    if (format_validity < 0) {
-        COMMLOG(OBS_LOGERROR, "Failed to validate config file format, error code: %d", format_validity);
-        fclose(fp);
-        free(config_path);
-        return -3;
-    }
-
-    COMMLOG(OBS_LOGINFO, "Loading SSL configuration from: %s", config_path);
-
-    char line[MAX_CONFIG_LINE] = {0};
-    int in_ssl_config = 0;
-
-    int line_number = 0;
-    while (fgets(line, sizeof(line), fp)) {
-        line_number++;
-        if (line[0] == '\n' || line[0] == '#' || line[0] == ';' || line[0] == '\r') {
-            continue;
-        }
-
-        if (strstr(line, "[SSLConfig]")) {
-            in_ssl_config = 1;
-            COMMLOG(OBS_LOGDEBUG, "Found SSLConfig section at line %d", line_number);
-            continue;
-        } else if (line[0] == '[') {
-            in_ssl_config = 0;
-            continue;
-        }
-
-        if (!in_ssl_config) {
-            continue;
-        }
-
-        char key[MAX_CONFIG_LINE] = {0};
-        char value[MAX_CONFIG_LINE] = {0};
-        char *eq_pos = strchr(line, '=');
-        if (eq_pos) {
-            int key_len = eq_pos - line;
-            strncpy_s(key, sizeof(key), line, key_len);
-            key[key_len] = '\0';
-
-            trim_string(key);
-            trim_string(eq_pos + 1);
-            strncpy_s(value, sizeof(value), eq_pos + 1, strlen(eq_pos + 1));
-            value[strcspn(value, "\r\n")] = '\0';
-
-            // 将配置项名称转换为枚举值
-            int item_index = -1;
-            if (strcmp(key, "MutualSSLEnabled") == 0) {
-                item_index = OBS_CONFIG_MUTUAL_SSL_SWITCH;
-                if (strcmp(value, "true") == 0) {
-                    strcpy_s(value, sizeof(value), "1"); // OBS_MUTUAL_SSL_OPEN
-                } else if (strcmp(value, "false") == 0) {
-                    strcpy_s(value, sizeof(value), "0"); // OBS_MUTUAL_SSL_CLOSE
-                }
-            } else if (strcmp(key, "ClientCertPath") == 0) {
-                item_index = OBS_CONFIG_CLIENT_CERT_PATH;
-            } else if (strcmp(key, "ClientKeyPath") == 0) {
-                item_index = OBS_CONFIG_CLIENT_KEY_PATH;
-            } else if (strcmp(key, "ClientKeyPassword") == 0) {
-                item_index = OBS_CONFIG_CLIENT_KEY_PASSWORD;
-#if OBS_ENABLE_GM_SUPPORT
-            } else if (strcmp(key, "GMModeEnabled") == 0) {
-                item_index = OBS_CONFIG_GM_MODE_SWITCH;
-                if (strcmp(value, "true") == 0) {
-                    strcpy_s(value, sizeof(value), "1"); // OBS_GM_MODE_OPEN
-                } else if (strcmp(value, "false") == 0) {
-                    strcpy_s(value, sizeof(value), "0"); // OBS_GM_MODE_CLOSE
-                }
-#endif
-            } else if (strcmp(key, "CipherList") == 0) {
-                item_index = OBS_CONFIG_SSL_CIPHER_LIST;
-            } else if (strcmp(key, "SSLMinVersion") == 0) {
-                item_index = OBS_CONFIG_SSL_MIN_VERSION;
-            } else if (strcmp(key, "SSLMaxVersion") == 0) {
-                item_index = OBS_CONFIG_SSL_MAX_VERSION;
-            } else if (strcmp(key, "OCSPStapling") == 0) {
-                item_index = OBS_CONFIG_OCSP_STAPLING;
-                if (strcmp(value, "true") == 0) {
-                    strcpy_s(value, sizeof(value), "1");
-                } else if (strcmp(value, "false") == 0) {
-                    strcpy_s(value, sizeof(value), "0");
-                }
-            } else if (strcmp(key, "CertificatePin") == 0) {
-                item_index = OBS_CONFIG_CERTIFICATE_PIN;
-            } else if (strcmp(key, "CertificatePinCount") == 0) {
-                item_index = OBS_CONFIG_CERTIFICATE_PIN_COUNT;
-            } else if (strcmp(key, "VerifyHostname") == 0) {
-                item_index = OBS_CONFIG_VERIFY_HOSTNAME;
-                if (strcmp(value, "true") == 0) {
-                    strcpy_s(value, sizeof(value), "1");
-                } else if (strcmp(value, "false") == 0) {
-                    strcpy_s(value, sizeof(value), "0");
-                }
-            } else if (strcmp(key, "EnableSessionTickets") == 0) {
-                item_index = OBS_CONFIG_ENABLE_SESSION_TICKETS;
-                if (strcmp(value, "true") == 0) {
-                    strcpy_s(value, sizeof(value), "1");
-                } else if (strcmp(value, "false") == 0) {
-                    strcpy_s(value, sizeof(value), "0");
-                }
-            } else if (strcmp(key, "SSLSessionCacheTimeout") == 0) {
-                item_index = OBS_CONFIG_SSL_SESSION_CACHE_TIMEOUT;
-            }
-
-            if (item_index != -1) {
-                config_set_internal(item_index, value, CONFIG_SOURCE_INI);
-            } else {
-                COMMLOG(OBS_LOGWARN, "Unknown config key: %s", key);
-            }
-        }
-    }
-
-    fclose(fp);
-    free(config_path);
-
+    // SSL配置（双向认证和国密）现在通过API设置，不再从配置文件加载
+    COMMLOG(OBS_LOGDEBUG, "SSL configuration loading from INI file is disabled");
     return 0;
 }
+
 
 /**
  * @brief 从环境变量加载配置
+ *
+ * 注意：SSL配置（双向认证和国密）现在仅通过API设置，不再从环境变量加载。
+ * 该函数保留以支持其他可能的配置项（如有需要可扩展）。
  */
 static int config_manager_load_env(void)
 {
-    // 首先加载非国密相关配置
-    const char *env_vars[] = {
-        "OBS_MUTUAL_SSL_ENABLED",
-        "OBS_CLIENT_CERT_PATH",
-        "OBS_CLIENT_KEY_PATH",
-        "OBS_CLIENT_KEY_PASSWORD",
-        "OBS_SSL_CIPHER_LIST",
-        "OBS_SSL_MIN_VERSION",
-        "OBS_SSL_MAX_VERSION",
-        "OBS_OCSP_STAPLING",
-        "OBS_CERTIFICATE_PIN",
-        "OBS_CERTIFICATE_PIN_COUNT",
-        "OBS_VERIFY_HOSTNAME",
-        "OBS_ENABLE_SESSION_TICKETS",
-        "OBS_SSL_SESSION_CACHE_TIMEOUT"
-    };
-
-    obs_config_item_t config_items[] = {
-        OBS_CONFIG_MUTUAL_SSL_SWITCH,
-        OBS_CONFIG_CLIENT_CERT_PATH,
-        OBS_CONFIG_CLIENT_KEY_PATH,
-        OBS_CONFIG_CLIENT_KEY_PASSWORD,
-        OBS_CONFIG_SSL_CIPHER_LIST,
-        OBS_CONFIG_SSL_MIN_VERSION,
-        OBS_CONFIG_SSL_MAX_VERSION,
-        OBS_CONFIG_OCSP_STAPLING,
-        OBS_CONFIG_CERTIFICATE_PIN,
-        OBS_CONFIG_CERTIFICATE_PIN_COUNT,
-        OBS_CONFIG_VERIFY_HOSTNAME,
-        OBS_CONFIG_ENABLE_SESSION_TICKETS,
-        OBS_CONFIG_SSL_SESSION_CACHE_TIMEOUT
-    };
-
-    for (int i = 0; i < sizeof(env_vars) / sizeof(env_vars[0]); i++) {
-        const char *env_value = getenv(env_vars[i]);
-        if (env_value) {
-            char value[MAX_CONFIG_LINE] = {0};
-            strncpy_s(value, sizeof(value), env_value, strlen(env_value));
-
-            // 处理布尔类型的配置
-            if (i == 0) { // MutualSSLEnabled
-                if (strcmp(env_value, "true") == 0 || strcmp(env_value, "1") == 0) {
-                    strcpy_s(value, sizeof(value), "1"); // Open
-                } else if (strcmp(env_value, "false") == 0 || strcmp(env_value, "0") == 0) {
-                    strcpy_s(value, sizeof(value), "0"); // Close
-                }
-            }
-
-            config_set_internal(config_items[i], value, CONFIG_SOURCE_ENV);
-        }
-    }
-
-#if OBS_ENABLE_GM_SUPPORT
-    // 加载国密模式配置
-    const char *gm_mode_env = getenv("OBS_GM_MODE_ENABLED");
-    if (gm_mode_env) {
-        char value[MAX_CONFIG_LINE] = {0};
-        strncpy_s(value, sizeof(value), gm_mode_env, strlen(gm_mode_env));
-        if (strcmp(gm_mode_env, "true") == 0 || strcmp(gm_mode_env, "1") == 0) {
-            strcpy_s(value, sizeof(value), "1"); // Open
-        } else if (strcmp(gm_mode_env, "false") == 0 || strcmp(gm_mode_env, "0") == 0) {
-            strcpy_s(value, sizeof(value), "0"); // Close
-        }
-        config_set_internal(OBS_CONFIG_GM_MODE_SWITCH, value, CONFIG_SOURCE_ENV);
-    }
-#endif
-
+    // SSL配置（双向认证和国密）现在仅通过API设置，不再从环境变量加载
+    COMMLOG(OBS_LOGDEBUG, "SSL configuration loading from environment variables is disabled");
     return 0;
 }
+
 
 /**
  * @brief 加载完整配置
@@ -1565,28 +1232,11 @@ int config_manager_export(char *buffer, int buffer_size)
 }
 
 // 保持与旧接口的兼容性
+// 注意：SSL配置（双向认证和国密）现在仅通过API设置，不再从配置文件或环境变量加载。
+// 该函数保留以保持接口兼容性，不执行任何操作。
 void load_ssl_config_from_ini(obs_options *options)
 {
-    if (!g_config_context.is_initialized) {
-        config_manager_init();
-    }
-
-    int result = config_manager_load_ini();
-    if (result != 0) {
-        COMMLOG(OBS_LOGWARN, "Failed to load config from ini file");
-    }
-
-    // 将配置复制到 options 结构体
-    memcpy(&options->request_options, &g_config_context.config, sizeof(obs_http_request_option));
-
-    // 加载环境变量配置（保持旧接口的行为）
-    load_ssl_config_from_env(options);
-
-    // 验证配置
-    int validation_result = validate_ssl_config(&options->request_options);
-    if (validation_result != 0) {
-        COMMLOG(OBS_LOGERROR, "SSL configuration validation failed with error code: %d", validation_result);
-    } else {
-        COMMLOG(OBS_LOGDEBUG, "SSL configuration validation passed");
-    }
+    // SSL配置（双向认证和国密）现在仅通过API设置，不再从配置文件或环境变量加载
+    // 该函数保留以保持接口兼容性，不执行任何操作。
+    (void)options; // 避免未使用参数警告
 }
