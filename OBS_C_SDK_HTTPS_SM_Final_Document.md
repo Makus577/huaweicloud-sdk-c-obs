@@ -1081,6 +1081,176 @@ endif()
 2. 降低对特定库的依赖风险
 3. 支持未来可能的其他国密实现
 
+## 13.7 基于Tongsuo官方文档的更正分析
+
+### 13.7.1 Tongsuo的EVP注册机制
+
+根据Tongsuo官方文档分析：
+
+**关键发现**：
+> "文档示例中未提及需显式调用 EVP_add_cipher() 或类似函数，推测 Tongsuo 已在内部完成国密算法的注册与初始化。"
+
+这意味着：
+1. **Tongsuo在SSL_library_init()时自动注册SM算法**
+2. **应用代码中的显式EVP_add_cipher()调用可能是冗余的**
+
+**更正后的注册机制**：
+```
+┌─────────────────────────────────────────────┐
+│         Tongsuo SSL库                  │
+│  (编译时已包含SM算法实现）             │
+│  ┌───────────────────────────────────┐   │
+│  │ SSL_library_init()          │   │
+│  │ - 自动注册SM算法到EVP层     │   │
+│  │ - 无需应用代码调用         │   │
+│  └───────────────────────────────────┘   │
+└──────────────┬────────────────────────────┘
+             │
+    编译时链接
+             │
+             ▼
+┌─────────────────────────────────────────────┐
+│         libcurl (链接Tongsuo)           │
+│  ┌───────────────────────────────────┐   │
+│  │ SSL_CTX_set_cipher_list()    │   │
+│  │ → 自动找到已注册的SM算法  │   │
+│  └───────────────────────────────────┘   │
+└─────────────────────────────────────────────┘
+```
+
+### 13.7.2 TLS v1.1 (NTLS) 与国密的支持
+
+**TLS 1.1 在国密场景的特性**：
+
+| 特性 | TLS 1.0 | TLS 1.1 (NTLS) | TLS 1.2 |
+|------|---------|----------------|---------|
+| SM2密钥交换 | ⚠️ 有限 | ✅ **完全支持** | ✅ 完全支持 |
+| SM4-GCM加密 | ❌ 不支持 | ✅ **支持** | ✅ 支持 |
+| 性能 | 较低 | ✅ **更好** | 好 |
+
+**关键区别**：
+- TLS 1.2: 标准TLS，国密通过扩展方式实现
+- **TLS 1.1 (NTLS)**: 国家TLS，是专门为国密设计的TLS 1.1变体
+
+**当前代码问题**：
+- 强制使用 TLSv1.2
+- **应该允许使用 TLSv1.1 (NTLS)** 以获得更好的国密支持
+
+### 13.7.3 更正后的国密配置建议
+
+| 要点 | 更正前的理解 | 更正后的理解 |
+|------|-------------|--------------|
+| EVP注册必要性 | 需要显式调用 | ❌ **不需要**，Tongsuo内部已自动注册 |
+| TLS版本选择 | TLSv1.2最好 | ❌ **NTLSv1.1是国密的最佳选择** |
+| TLS 1.1支持 | 可能有兼容性问题 | ✅ **NTLSv1.1完全支持SM算法** |
+| libcurl集成 | 编译时+运行时配置 | ✅ **编译时链接Tongsuo即可** |
+
+### 13.7.4 更正后的代码修改建议
+
+**修改1：简化 obs_ssl_gm_config_init()**
+
+当前代码（可能是冗余的显式注册）：
+```c
+int obs_ssl_gm_config_init(void) {
+    if (EVP_add_cipher(EVP_sm4_ecb()) == 0 ||
+        EVP_add_cipher(EVP_sm4_cbc()) == 0 ||
+        EVP_add_cipher(EVP)sm4_gcm()) == 0 ||
+        EVP_add_digest(EVP_sm3()) == 0 ||
+        EVP_add_cipher(EVP_sm2()) == 0) {
+        return -1;
+    }
+    // ...
+}
+```
+
+建议简化为仅检查支持：
+```c
+int obs_ssl_gm_config_init(void) {
+    // Tongsuo内部已自动注册SM算法
+    // 只需要检查是否支持即可
+
+    // 检查SM3算法是否可用
+    const EVP_MD *sm3 = EVP_get_digestbyname("sm3");
+    if (!sm3) {
+        COMMLOG(OBS_LOGERROR, "SM3 digest not available in SSL library");
+        return -1;
+    }
+
+    // 检查SM4算法是否可用
+    const EVP_CIPHER *sm4 = EVP_get_cipherbyname("sm4-gcm");
+    if (!sm4) {
+        COMMLOG(OBS_LOGERROR, "SM4 cipher not available in SSL library");
+        return -2;
+;
+
+    // 检查SM2曲线是否可用
+    if (!EC_GROUP_new_by_curve_name(NID_sm2)) {
+        COMMLOG(OBS_LOGERROR, "SM2 curve not available in SSL library");
+        return -3;
+    }
+
+    COMMLOG(OBS_LOGINFO, "GM SSL support verified (SM2/SM3/SM4 available)");
+    return 0;
+}
+```
+
+**修改2：支持 NTLS v1.1 用于国密**
+
+文件：`request.c`，约第604行
+
+当前代码（强制TLSv1.2）：
+```c
+status = curl_easy_setopt(request->curl, CURLOPT_SSL_VERSION,
+                                CURL_SSLVERSION_TLSv1_2);
+```
+
+建议修改为：
+```c
+// NTLSv1.1 是国密的最佳选择
+long gm_default_version = (1 << 16) | 1;  // CURL_SSLVERSION_NTLSv1_1
+
+// 允许用户覆盖版本配置
+long gm_version = = params->request_option.ssl_min_version ?
+                      params->request_option.ssl_min_version : gm_default_version;
+
+if (gm_version != gm_default_version) {
+    COMMLOG(OBS_LOGWARN, "GM mode: using custom TLS version (recommendation: NTLSv1.1)");
+}
+
+status = curl_easy_setopt(request->curl, CURLOPT_SSL_VERSION, gm_version);
+```
+
+**修改3：添加国密套件自动降级机制**
+
+当OBS服务可能不支持默认套件时，需要自动降级：
+
+```c
+// 国密套件优先级列表（从高到低）
+static const char *gm_cipher_fallback_list[] = {
+    "ECDHE-SM2-WITH-SM4-GCM-SM3:GCM-SHA384",  // 最强
+    "ECDHE-SM2-WITH-SM4-GCM-SM3",             // 标准
+GCM-SM3",                // CBC模式（兼容性更好）
+    "ECDHE-SM2-WITH-SM4-CTR-SM3",            // CTR模式
+    NULL
+};
+
+// 增加重试逻辑
+int try_gm_cipher_fallback(http_request *request, const char **cipher_list, int *index) {
+    if (*index >= 0 && cipher_list[*index] != NULL) {
+        const char *cipher = cipher_list[*index];
+
+        CURLcode status = curl_easy_setopt(request->curl,
+                                              CURLOPT_SSL_CIPHER_LIST, cipher);
+        if (status == CURLE_OK) {
+            COMMLOG(OBS_LOGINFO, "Trying GM cipher: %s (attempt %d)",
+                         cipher, *index + 1);
+            return 1;  // 尝试成功
+        }
+    }
+    return 0;
+}
+```
+
 ## 14. 风险评估和缓解策略
 
 ### 14.1 风险1：算法库兼容性

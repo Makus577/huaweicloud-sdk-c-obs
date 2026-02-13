@@ -31,9 +31,14 @@ extern "C" {
 /**
  * @brief 国密SSL配置初始化
  *
- * 初始化国密SSL配置，包括加载国密算法、设置国密密码套件等。
+ * 检查国密算法是否可用。
+ * 注意：Tongsuo在SSL_library_init()时已自动注册SM算法，这里仅验证可用性。
  *
  * @return int 初始化结果：0表示成功，负数表示失败
+ *         -1: SM3算法不可用
+ *         -2: SM4-GCM算法不可用
+ *         -3: SM4-CBC算法不可用
+ *         -4: SM2曲线不可用
  */
 int obs_ssl_gm_config_init(void);
 

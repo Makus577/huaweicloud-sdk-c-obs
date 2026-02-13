@@ -13,16 +13,55 @@
 #include "log.h"
 #include <openssl/ssl.h>
 #include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/ec.h>
+#include <openssl/err.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#ifdef WIN32
+#include <windows.h>
+#else
+#include <pthread.h>
+#endif
 
 // 全局状态变量
 static sm_crypto_implementation_type_t g_implementation = SM_CRYPTO_IMPLEMENTATION_AUTO;
 static sm_crypto_acceleration_type_t g_acceleration_type = SM_CRYPTO_ACCELERATION_NONE;
 static sm_crypto_performance_stats_t g_performance_stats = {0};
 static int g_is_initialized = 0;
+
+// 线程安全保护
+#ifdef WIN32
+static CRITICAL_SECTION g_mutex;
+static int g_mutex_initialized = 0;
+#else
+static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
+// 获取互斥锁
+static void lock_mutex(void) {
+#ifdef WIN32
+    if (g_mutex_initialized) {
+        EnterCriticalSection(&g_mutex);
+    }
+#else
+    pthread_mutex_lock(&g_mutex);
+#endif
+}
+
+// 释放互斥锁
+static void unlock_mutex(void) {
+#ifdef WIN32
+    if (g_mutex_initialized) {
+        LeaveCriticalSection(&g_mutex);
+    }
+#else
+    pthread_mutex_unlock(&g_mutex);
+#endif
+}
 
 // 时间测量函数（用于性能统计）
 static uint64_t get_current_time_ms(void)
@@ -71,6 +110,23 @@ static sm_crypto_acceleration_type_t detect_hardware_acceleration(void)
     return SM_CRYPTO_ACCELERATION_NONE;
 }
 
+// 更新性能统计（线程安全）
+static void update_performance_stats(uint64_t bytes_processed, uint64_t duration_ms)
+{
+    lock_mutex();
+    g_performance_stats.total_bytes_processed += bytes_processed;
+    g_performance_stats.total_operations += 1;
+    g_performance_stats.total_time_ms += duration_ms;
+
+    // 计算平均速度（Mbps）
+    double total_bytes = g_performance_stats.total_bytes_processed;
+    double total_time_seconds = g_performance_stats.total_time_ms / 1000.0;
+    if (total_time_seconds > 0) {
+        g_performance_stats.average_speed_mbps = (total_bytes * 8) / (total_time_seconds * 1000000);
+    }
+    unlock_mutex();
+}
+
 /**
  * @brief 初始化国密算法支持
  *
@@ -81,18 +137,31 @@ static sm_crypto_acceleration_type_t detect_hardware_acceleration(void)
  */
 int obs_sm_crypto_init(sm_crypto_implementation_type_t implementation)
 {
+    // 初始化互斥锁（仅初始化一次）
+#ifdef WIN32
+    if (!g_mutex_initialized) {
+        InitializeCriticalSection(&g_mutex);
+        g_mutex_initialized = 1;
+    }
+#endif
+
+    lock_mutex();
+
     // 检查是否已初始化
     if (g_is_initialized) {
+        unlock_mutex();
         COMMLOG(OBS_LOGWARN, "SM crypto already initialized");
         return 0;
     }
 
     // 检查OpenSSL/Tongsuo库是否已初始化
+    unlock_mutex();
     if (SSL_library_init() != 1)
     {
         COMMLOG(OBS_LOGERROR, "%s Failed to initialize OpenSSL library", __FUNCTION__);
         return -1;
     }
+    lock_mutex();
 
     OpenSSL_add_all_algorithms();
     SSL_load_error_strings();
@@ -118,6 +187,7 @@ int obs_sm_crypto_init(sm_crypto_implementation_type_t implementation)
     memset(&g_performance_stats, 0, sizeof(sm_crypto_performance_stats_t));
 
     g_is_initialized = 1;
+    unlock_mutex();
 
     COMMLOG(OBS_LOGINFO, "SM crypto initialization completed");
 
@@ -223,12 +293,16 @@ int obs_sm_crypto_supports_sm4(void)
  */
 sm_crypto_acceleration_type_t obs_sm_crypto_detect_acceleration(void)
 {
+    lock_mutex();
     if (!g_is_initialized) {
+        unlock_mutex();
         COMMLOG(OBS_LOGERROR, "SM crypto not initialized");
         return SM_CRYPTO_ACCELERATION_NONE;
     }
 
-    return g_acceleration_type;
+    sm_crypto_acceleration_type_t result = g_acceleration_type;
+    unlock_mutex();
+    return result;
 }
 
 /**
@@ -239,12 +313,16 @@ sm_crypto_acceleration_type_t obs_sm_crypto_detect_acceleration(void)
  */
 int obs_sm_crypto_supports_acceleration(sm_crypto_acceleration_type_t type)
 {
+    lock_mutex();
     if (!g_is_initialized) {
+        unlock_mutex();
         COMMLOG(OBS_LOGERROR, "SM crypto not initialized");
         return 0;
     }
 
-    return (g_acceleration_type == type);
+    int result = (g_acceleration_type == type);
+    unlock_mutex();
+    return result;
 }
 
 /**
@@ -257,18 +335,23 @@ int obs_sm_crypto_supports_acceleration(sm_crypto_acceleration_type_t type)
  */
 int obs_sm_crypto_set_implementation(sm_crypto_implementation_type_t implementation)
 {
+    lock_mutex();
     if (!g_is_initialized) {
+        unlock_mutex();
         COMMLOG(OBS_LOGERROR, "SM crypto not initialized");
         return -1;
     }
 
     if (implementation == SM_CRYPTO_IMPLEMENTATION_HARDWARE &&
         g_acceleration_type == SM_CRYPTO_ACCELERATION_NONE) {
+        unlock_mutex();
         COMMLOG(OBS_LOGERROR, "Hardware acceleration not supported on this platform");
         return -2;
     }
 
     g_implementation = implementation;
+    unlock_mutex();
+
     COMMLOG(OBS_LOGINFO, "Algorithm implementation set to %s",
             (implementation == SM_CRYPTO_IMPLEMENTATION_SOFTWARE ? "software" :
              implementation == SM_CRYPTO_IMPLEMENTATION_HARDWARE ? "hardware" : "auto"));
@@ -283,12 +366,16 @@ int obs_sm_crypto_set_implementation(sm_crypto_implementation_type_t implementat
  */
 sm_crypto_implementation_type_t obs_sm_crypto_get_implementation(void)
 {
+    lock_mutex();
     if (!g_is_initialized) {
+        unlock_mutex();
         COMMLOG(OBS_LOGERROR, "SM crypto not initialized");
         return SM_CRYPTO_IMPLEMENTATION_SOFTWARE;
     }
 
-    return g_implementation;
+    sm_crypto_implementation_type_t result = g_implementation;
+    unlock_mutex();
+    return result;
 }
 
 /**
@@ -301,17 +388,20 @@ sm_crypto_implementation_type_t obs_sm_crypto_get_implementation(void)
  */
 int obs_sm_crypto_get_performance_stats(sm_crypto_performance_stats_t *stats)
 {
-    if (!g_is_initialized) {
-        COMMLOG(OBS_LOGERROR, "SM crypto not initialized");
-        return -1;
-    }
-
     if (!stats) {
         COMMLOG(OBS_LOGERROR, "Invalid parameter: stats is NULL");
         return -2;
     }
 
+    lock_mutex();
+    if (!g_is_initialized) {
+        unlock_mutex();
+        COMMLOG(OBS_LOGERROR, "SM crypto not initialized");
+        return -1;
+    }
+
     *stats = g_performance_stats;
+    unlock_mutex();
 
     return 0;
 }
@@ -325,12 +415,16 @@ int obs_sm_crypto_get_performance_stats(sm_crypto_performance_stats_t *stats)
  */
 int obs_sm_crypto_reset_performance_stats(void)
 {
+    lock_mutex();
     if (!g_is_initialized) {
+        unlock_mutex();
         COMMLOG(OBS_LOGERROR, "SM crypto not initialized");
         return -1;
     }
 
     memset(&g_performance_stats, 0, sizeof(sm_crypto_performance_stats_t));
+    unlock_mutex();
+
     COMMLOG(OBS_LOGDEBUG, "Performance statistics reset");
 
     return 0;
@@ -529,16 +623,7 @@ int obs_sm3_hash(const unsigned char *data, int data_len, unsigned char *digest)
     // 更新性能统计
     uint64_t end_time = get_current_time_ms();
     uint64_t duration = end_time - start_time;
-    g_performance_stats.total_bytes_processed += data_len;
-    g_performance_stats.total_operations += 1;
-    g_performance_stats.total_time_ms += duration;
-
-    // 计算平均速度（Mbps）
-    double total_bytes = g_performance_stats.total_bytes_processed;
-    double total_time_seconds = g_performance_stats.total_time_ms / 1000.0;
-    if (total_time_seconds > 0) {
-        g_performance_stats.average_speed_mbps = (total_bytes * 8) / (total_time_seconds * 1000000);
-    }
+    update_performance_stats(data_len, duration);
 
     return 0;
 }
@@ -643,16 +728,7 @@ int obs_sm4_encrypt(const unsigned char *key, const unsigned char *iv,
     // 更新性能统计
     uint64_t end_time = get_current_time_ms();
     uint64_t duration = end_time - start_time;
-    g_performance_stats.total_bytes_processed += plaintext_len;
-    g_performance_stats.total_operations += 1;
-    g_performance_stats.total_time_ms += duration;
-
-    // 计算平均速度（Mbps）
-    double total_bytes = g_performance_stats.total_bytes_processed;
-    double total_time_seconds = g_performance_stats.total_time_ms / 1000.0;
-    if (total_time_seconds > 0) {
-        g_performance_stats.average_speed_mbps = (total_bytes * 8) / (total_time_seconds * 1000000);
-    }
+    update_performance_stats(plaintext_len, duration);
 
     return 0;
 }
@@ -757,16 +833,7 @@ int obs_sm4_decrypt(const unsigned char *key, const unsigned char *iv,
     // 更新性能统计
     uint64_t end_time = get_current_time_ms();
     uint64_t duration = end_time - start_time;
-    g_performance_stats.total_bytes_processed += ciphertext_len;
-    g_performance_stats.total_operations += 1;
-    g_performance_stats.total_time_ms += duration;
-
-    // 计算平均速度（Mbps）
-    double total_bytes = g_performance_stats.total_bytes_processed;
-    double total_time_seconds = g_performance_stats.total_time_ms / 1000.0;
-    if (total_time_seconds > 0) {
-        g_performance_stats.average_speed_mbps = (total_bytes * 8) / (total_time_seconds * 1000000);
-    }
+    update_performance_stats(ciphertext_len, duration);
 
     return 0;
 }
@@ -795,24 +862,171 @@ int obs_sm2_sign(const char *private_key, const unsigned char *data, int data_le
 
     uint64_t start_time = get_current_time_ms();
 
-    // 简单实现，需要根据实际情况完善
-    // 此处需要实现从PEM格式字符串中解析私钥、创建SM2签名上下文等功能
-    COMMLOG(OBS_LOGWARN, "%s SM2 signature implementation is not complete", __FUNCTION__);
-
-    uint64_t end_time = get_current_time_ms();
-    uint64_t duration = end_time - start_time;
-    g_performance_stats.total_bytes_processed += data_len;
-    g_performance_stats.total_operations += 1;
-    g_performance_stats.total_time_ms += duration;
-
-    // 计算平均速度（Mbps）
-    double total_bytes = g_performance_stats.total_bytes_processed;
-    double total_time_seconds = g_performance_stats.total_time_ms / 1000.0;
-    if (total_time_seconds > 0) {
-        g_performance_stats.average_speed_mbps = (total_bytes * 8) / (total_time_seconds * 1000000);
+    // 创建BIO从PEM字符串读取私钥
+    BIO *bio = BIO_new_mem_buf(private_key, (int)strlen(private_key));
+    if (!bio)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to create BIO", __FUNCTION__);
+        return -2;
     }
 
-    return -1;
+    // 从BIO中读取EC私钥
+    EC_KEY *ec_key = PEM_read_bio_ECPrivateKey(bio, NULL, NULL, NULL);
+    BIO_free(bio);
+    if (!ec_key)
+    {
+        unsigned long err = ERR_get_error();
+        char err_buf[256] = {0};
+        ERR_error_string_n(err, err_buf, sizeof(err_buf));
+        COMMLOG(OBS_LOGERROR, "%s Failed to parse private key: %s", __FUNCTION__, err_buf);
+        return -3;
+    }
+
+    // 检查私钥曲线是否为SM2
+    const EC_GROUP *group = EC_KEY_get0_group(ec_key);
+    int curve_nid = EC_GROUP_get_curve_name(group);
+    if (curve_nid != NID_sm2)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Private key is not SM2 curve (curve_nid=%d)", __FUNCTION__, curve_nid);
+        EC_KEY_free(ec_key);
+        return -4;
+    }
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    EVP_PKEY_CTX *pkey_ctx = NULL;
+    EVP_MD_CTX md_ctx;
+    EVP_MD_CTX_init(&md_ctx);
+
+    // 创建EVP_MD_CTX并初始化
+    if (EVP_DigestSignInit(&md_ctx, &pkey_ctx, EVP_sm3(), NULL, NULL) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to initialize digest sign", __FUNCTION__);
+        EC_KEY_free(ec_key);
+        EVP_MD_CTX_cleanup(&md_ctx);
+        return -5;
+    }
+
+    // 将EC密钥转换为EVP_PKEY
+    EVP_PKEY *pkey = EVP_PKEY_new();
+    EVP_PKEY_assign_EC_KEY(pkey, ec_key);
+
+    // 设置签名私钥
+    EVP_PKEY_CTX_set0_pkey(pkey_ctx, pkey);
+
+    // 计算签名长度
+    size_t sig_len_temp = 0;
+    if (EVP_DigestSignUpdate(&md_ctx, data, data_len) != 1 ||
+        EVP_DigestSignFinal(&md_ctx, NULL, &sig_len_temp) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to calculate signature length", __FUNCTION__);
+        EC_KEY_free(ec_key);
+        EVP_MD_CTX_cleanup(&md_ctx);
+        return -6;
+    }
+
+    // 检查输出缓冲区是否足够
+    if (sig_len_temp > (size_t)*sig_len)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Output buffer too small (need %zu, have %d)",
+                 __FUNCTION__, sig_len_temp, *sig_len);
+        EC_KEY_free(ec_key);
+        EVP_MD_CTX_cleanup(&md_ctx);
+        return -7;
+    }
+
+    // 执行签名
+    if (EVP_DigestSignFinal(&md_ctx, signature, &sig_len_temp) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to sign data", __FUNCTION__);
+        EC_KEY_free(ec_key);
+        EVP_MD_CTX_cleanup(&md_ctx);
+        return -8;
+    }
+
+    *sig_len = (int)sig_len_temp;
+    EVP_MD_CTX_cleanup(&md_ctx);
+#else
+    // 创建EVP_PKEY_CTX用于签名
+    EVP_PKEY *pkey = EVP_PKEY_new();
+    EVP_PKEY_assign_EC_KEY(pkey, ec_key);
+
+    EVP_PKEY_CTX *pkey_ctx = EVP_PKEY_CTX_new(pkey, NULL);
+    if (!pkey_ctx)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to create PKEY context", __FUNCTION__);
+        EVP_PKEY_free(pkey);
+        return -5;
+    }
+
+    // 初始化签名上下文
+    EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
+    if (!md_ctx)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to create MD context", __FUNCTION__);
+        EVP_PKEY_CTX_free(pkey_ctx);
+        EVP_PKEY_free(pkey);
+        return -6;
+    }
+
+    if (EVP_DigestSignInit(md_ctx, &pkey_ctx, EVP_sm3(), NULL, pkey) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to initialize digest sign", __FUNCTION__);
+        EVP_MD_CTX_free(md_ctx);
+        EVP_PKEY_free(pkey);
+        return -7;
+    }
+
+    // 更新待签名数据
+    if (EVP_DigestSignUpdate(md_ctx, data, data_len) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to update digest", __FUNCTION__);
+        EVP_MD_CTX_free(md_ctx);
+        EVP_PKEY_free(pkey);
+        return -8;
+    }
+
+    // 计算签名长度
+    size_t sig_len_temp = 0;
+    if (EVP_DigestSignFinal(md_ctx, NULL, &sig_len_temp) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to calculate signature length", __FUNCTION__);
+        EVP_MD_CTX_free(md_ctx);
+        EVP_PKEY_free(pkey);
+        return -9;
+    }
+
+    // 检查输出缓冲区是否足够
+    if (sig_len_temp > (size_t)*sig_len)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Output buffer too small (need %zu, have %d)",
+                 __FUNCTION__, sig_len_temp, *sig_len);
+        EVP_MD_CTX_free(md_ctx);
+        EVP_PKEY_free(pkey);
+        return -10;
+    }
+
+    // 执行签名
+    if (EVP_DigestSignFinal(md_ctx, signature, &sig_len_temp) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to sign data", __FUNCTION__);
+        EVP_MD_CTX_free(md_ctx);
+        EVP_PKEY_free(pkey);
+        return -11;
+    }
+
+    *sig_len = (int)sig_len_temp;
+    EVP_MD_CTX_free(md_ctx);
+    EVP_PKEY_free(pkey);
+#endif
+
+    // 更新性能统计
+    uint64_t end_time = get_current_time_ms();
+    uint64_t duration = end_time - start_time;
+    update_performance_stats(data_len, duration);
+
+    COMMLOG(OBS_LOGDEBUG, "%s SM2 signature completed (sig_len=%d)", __FUNCTION__, *sig_len);
+
+    return 0;
 }
 
 /**
@@ -839,24 +1053,140 @@ int obs_sm2_verify(const char *public_key, const unsigned char *data, int data_l
 
     uint64_t start_time = get_current_time_ms();
 
-    // 简单实现，需要根据实际情况完善
-    // 此处需要实现从PEM格式字符串中解析公钥、创建SM2验证上下文等功能
-    COMMLOG(OBS_LOGWARN, "%s SM2 verification implementation is not complete", __FUNCTION__);
-
-    uint64_t end_time = get_current_time_ms();
-    uint64_t duration = end_time - start_time;
-    g_performance_stats.total_bytes_processed += data_len;
-    g_performance_stats.total_operations += 1;
-    g_performance_stats.total_time_ms += duration;
-
-    // 计算平均速度（Mbps）
-    double total_bytes = g_performance_stats.total_bytes_processed;
-    double total_time_seconds = g_performance_stats.total_time_ms / 1000.0;
-    if (total_time_seconds > 0) {
-        g_performance_stats.average_speed_mbps = (total_bytes * 8) / (total_time_seconds * 1000000);
+    // 创建BIO从PEM字符串读取公钥
+    BIO *bio = BIO_new_mem_buf(public_key, (int)strlen(public_key));
+    if (!bio)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to create BIO", __FUNCTION__);
+        return -2;
     }
 
-    return -1;
+    // 从BIO中读取EC公钥
+    EC_KEY *ec_key = PEM_read_bio_EC_PUBKEY(bio, NULL, NULL, NULL);
+    BIO_free(bio);
+    if (!ec_key)
+    {
+        unsigned long err = ERR_get_error();
+        char err_buf[256] = {0};
+        ERR_error_string_n(err, err_buf, sizeof(err_buf));
+        COMMLOG(OBS_LOGERROR, "%s Failed to parse public key: %s", __FUNCTION__, err_buf);
+        return -3;
+    }
+
+    // 检查公钥曲线是否为SM2
+    const EC_GROUP *group = EC_KEY_get0_group(ec_key);
+    int curve_nid = EC_GROUP_get_curve_name(group);
+    if (curve_nid != NID_sm2)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Public key is not SM2 curve (curve_nid=%d)", __FUNCTION__, curve_nid);
+        EC_KEY_free(ec_key);
+        return -4;
+    }
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    EVP_PKEY_CTX *pkey_ctx = NULL;
+    EVP_MD_CTX md_ctx;
+    EVP_MD_CTX_init(&md_ctx);
+
+    // 创建EVP_PKEY并设置公钥
+    EVP_PKEY *pkey = EVP_PKEY_new();
+    EVP_PKEY_assign_EC_KEY(pkey, ec_key);
+
+    // 初始化验证上下文
+    if (EVP_DigestVerifyInit(&md_ctx, &pkey_ctx, EVP_sm3(), NULL, NULL) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to initialize digest verify", __FUNCTION__);
+        EC_KEY_free(ec_key);
+        EVP_MD_CTX_cleanup(&md_ctx);
+        return -5;
+    }
+
+    // 设置验证公钥
+    EVP_PKEY_CTX_set0_pkey(pkey_ctx, pkey);
+
+    // 更新待验证数据
+    if (EVP_DigestVerifyUpdate(&md_ctx, data, data_len) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to update digest", __FUNCTION__);
+        EC_KEY_free(ec_key);
+        EVP_MD_CTX_cleanup(&md_ctx);
+        return -6;
+    }
+
+    // 执行验证
+    int verify_result = EVP_DigestVerifyFinal(&md_ctx, signature, (size_t)sig_len);
+    EVP_MD_CTX_cleanup(&md_ctx);
+
+    if (verify_result != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Signature verification failed", __FUNCTION__);
+        EC_KEY_free(ec_key);
+        return -7;
+    }
+
+    EC_KEY_free(ec_key);
+#else
+    // 创建EVP_PKEY
+    EVP_PKEY *pkey = EVP_PKEY_new();
+    EVP_PKEY_assign_EC_KEY(pkey, ec_key);
+
+    // 创建PKEY上下文
+    EVP_PKEY_CTX *pkey_ctx = EVP_PKEY_CTX_new(pkey, NULL);
+    if (!pkey_ctx)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to create PKEY context", __FUNCTION__);
+        EVP_PKEY_free(pkey);
+        return -5;
+    }
+
+    // 创建MD上下文
+    EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
+    if (!md_ctx)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to create MD context", __FUNCTION__);
+        EVP_PKEY_CTX_free(pkey_ctx);
+        EVP_PKEY_free(pkey);
+        return -6;
+    }
+
+    // 初始化验证上下文
+    if (EVP_DigestVerifyInit(md_ctx, &pkey_ctx, EVP_sm3(), NULL, pkey) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to initialize digest verify", __FUNCTION__);
+        EVP_MD_CTX_free(md_ctx);
+        EVP_PKEY_free(pkey);
+        return -7;
+    }
+
+    // 更新待验证数据
+    if (EVP_DigestVerifyUpdate(md_ctx, data, data_len) != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Failed to update digest", __FUNCTION__);
+        EVP_MD_CTX_free(md_ctx);
+        EVP_PKEY_free(pkey);
+        return -8;
+    }
+
+    // 执行验证
+    int verify_result = EVP_DigestVerifyFinal(md_ctx, signature, (size_t)sig_len);
+    EVP_MD_CTX_free(md_ctx);
+    EVP_PKEY_free(pkey);
+
+    if (verify_result != 1)
+    {
+        COMMLOG(OBS_LOGERROR, "%s Signature verification failed", __FUNCTION__);
+        return -9;
+    }
+#endif
+
+    // 更新性能统计
+    uint64_t end_time = get_current_time_ms();
+    uint64_t duration = end_time - start_time;
+    update_performance_stats(data_len, duration);
+
+    COMMLOG(OBS_LOGDEBUG, "%s SM2 signature verification completed", __FUNCTION__);
+
+    return 0;
 }
 
 #endif /* OBS_ENABLE_GM_SUPPORT */

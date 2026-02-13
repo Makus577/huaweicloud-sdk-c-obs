@@ -590,8 +590,8 @@ obs_status setup_CA(http_request *request,
         curl_easy_setopt_safe(CURLOPT_SSL_CTX_FUNCTION, &gm_sslctx_function);
         curl_easy_setopt_safe(CURLOPT_SSL_CTX_DATA, (void *)params);
 
-        // 设置默认的国密密码套件（通过SSL上下文回调设置）
-        const char *gm_cipher_default = "ECDHE-SM2-WITH-SM4-SM3:ECDHE-SM2-WITH-SM4-GCM-SM3";
+        // 设置默认的国密密码套件
+        const char *gm_cipher_default = "ECDHE-SM2-WITH-SM4-GCM-SM3:ECDHE-SM2-WITH-SM4-SM3";
         const char *cipher_list = params->request_option.ssl_cipher_list ?
                                   params->request_option.ssl_cipher_list : gm_cipher_default;
 
@@ -601,13 +601,22 @@ obs_status setup_CA(http_request *request,
             return OBS_STATUS_InternalError;
         }
 
-        status = curl_easy_setopt(request->curl, CURLOPT_SSL_VERSION, CURL_SSLVERSION_TLSv1_2);
+        // 国密模式推荐使用NTLSv1.1，允许用户配置覆盖
+        long gm_default_version = (1 << 16) | 1;  // CURL_SSLVERSION_NTLSv1_1
+        long gm_version = params->request_option.ssl_min_version ?
+                             params->request_option.ssl_min_version : gm_default_version;
+
+        if (gm_version != gm_default_version) {
+            COMMLOG(OBS_LOGWARN, "%s GM mode: using custom TLS version (recommendation: NTLSv1.1)", __FUNCTION__);
+        }
+
+        status = curl_easy_setopt(request->curl, CURLOPT_SSL_VERSION, gm_version);
         if (status != CURLE_OK) {
             COMMLOG(OBS_LOGERROR, "%s Failed to set GM SSL version: %s", __FUNCTION__, curl_easy_strerror(status));
             return OBS_STATUS_InternalError;
         }
 
-        COMMLOG(OBS_LOGINFO, "%s GM mode: enabled with cipher: %s (using custom SSL callback)", __FUNCTION__, cipher_list);
+        COMMLOG(OBS_LOGINFO, "%s GM mode: enabled with cipher: %s, TLS version: NTLSv1.1 (recommended)", __FUNCTION__, cipher_list);
         return OBS_STATUS_OK;
     }
 #endif

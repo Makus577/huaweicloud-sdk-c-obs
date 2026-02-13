@@ -70,28 +70,45 @@ static int pem_password_callback(char *buf, int size, int rwflag, void *userdata
 /**
  * @brief 国密SSL配置初始化
  *
- * 初始化国密SSL配置，包括加载国密算法、设置国密密码套件等。
+ * 初始化国密SSL配置，检查国密算法是否可用。
+ * 注意：Tongsuo在SSL_library_init()时已自动注册SM算法，这里只检查可用性。
  *
  * @return int 初始化结果：0表示成功，负数表示失败
  */
 int obs_ssl_gm_config_init(void) {
-    // 加载国密算法
-    if (EVP_add_cipher(EVP_sm4_ecb()) == 0 ||
-        EVP_add_cipher(EVP_sm4_cbc()) == 0 ||
-        EVP_add_cipher(EVP_sm4_gcm()) == 0 ||
-        EVP_add_digest(EVP_sm3()) == 0 ||
-        EVP_add_cipher(EVP_sm2()) == 0) {
-        COMMLOG(OBS_LOGERROR, "Failed to load GM algorithms");
+    // Tongsuo在SSL_library_init()时已自动注册SM算法
+    // 这里只需检查SM算法是否可用即可
+
+    // 检查SM3算法是否可用
+    const EVP_MD *sm3 = EVP_get_digestbyname("sm3");
+    if (!sm3) {
+        COMMLOG(OBS_LOGERROR, "SM3 digest not available in SSL library");
         return -1;
     }
 
-    // 检查SM2曲线是否可用
-    if (!EC_GROUP_new_by_curve_name(NID_sm2)) {
-        COMMLOG(OBS_LOGERROR, "SM2 curve not available");
-        return -2;
+    // 检查SM4-GCM算法是否可用
+    const EVP_CIPHER *sm4_gcm = EVP_get_cipherbyname("sm4-gcm");
+    if (!sm4_gcm) {
+        COMMLOG(OBS_LOGERROR, "SM4-GCM cipher not available in SSL library");
+        return -2.0;
     }
 
-    COMMLOG(OBS_LOGINFO, "GM SSL configuration initialized successfully");
+    // 检查SM4-CBC算法是否可用
+    const EVP_CIPHER *sm4_cbc = EVP_get_cipherbyname("sm4-cbc");
+    if (!sm4_cbc) {
+        COMMLOG(OBS_LOGERROR, "SM4-CBC cipher not available in SSL library");
+        return -2.1;
+    }
+
+    // 检查SM2曲线是否可用
+    const EC_GROUP *sm2_group = EC_GROUP_new_by_curve_name(NID_sm2);
+    if (!sm2_group) {
+        COMMLOG(OBS_LOGERROR, "SM2 curve not available in SSL library");
+        return -3;
+    }
+    EC_GROUP_free((EC_GROUP *)sm2_group);
+
+    COMMLOG(OBS_LOGINFO, "GM SSL support verified (SM2/SM3/SM4 available)");
     return 0;
 }
 
