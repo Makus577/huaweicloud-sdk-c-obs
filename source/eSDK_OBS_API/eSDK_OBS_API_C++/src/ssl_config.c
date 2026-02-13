@@ -132,19 +132,40 @@ static int config_set_internal(obs_config_item_t item, const char *value, config
             if (g_config_context.config.proxy_host) {
                 free(g_config_context.config.proxy_host);
             }
-            g_config_context.config.proxy_host = strdup(value);
+            {
+                char *new_value = strdup(value);
+                if (!new_value) {
+                    COMMLOG(OBS_LOGERROR, "%s Failed to duplicate proxy_host value", __FUNCTION__);
+                    return -3;
+                }
+                g_config_context.config.proxy_host = new_value;
+            }
             break;
         case OBS_CONFIG_PROXY_AUTH:
             if (g_config_context.config.proxy_auth) {
                 free(g_config_context.config.proxy_auth);
             }
-            g_config_context.config.proxy_auth = strdup(value);
+            {
+                char *new_value = strdup(value);
+                if (!new_value) {
+                    COMMLOG(OBS_LOGERROR, "%s Failed to duplicate proxy_auth value", __FUNCTION__);
+                    return -3;
+                }
+                g_config_context.config.proxy_auth = new_value;
+            }
             break;
         case OBS_CONFIG_SSL_CIPHER_LIST:
             if (g_config_context.config.ssl_cipher_list) {
                 free(g_config_context.config.ssl_cipher_list);
             }
-            g_config_context.config.ssl_cipher_list = strdup(value);
+            {
+                char *new_value = strdup(value);
+                if (!new_value) {
+                    COMMLOG(OBS_LOGERROR, "%s Failed to duplicate ssl_cipher_list value", __FUNCTION__);
+                    return -3;
+                }
+                g_config_context.config.ssl_cipher_list = new_value;
+            }
             break;
         case OBS_CONFIG_FORBID_REUSE_TCP:
             g_config_context.config.forbid_reuse_tcp = (strcmp(value, "true") == 0 || atoi(value) != 0);
@@ -168,7 +189,14 @@ static int config_set_internal(obs_config_item_t item, const char *value, config
             if (g_config_context.config.server_cert_path) {
                 free(g_config_context.config.server_cert_path);
             }
-            g_config_context.config.server_cert_path = strdup(value);
+            {
+                char *new_value = strdup(value);
+                if (!new_value) {
+                    COMMLOG(OBS_LOGERROR, "%s Failed to duplicate server_cert_path value", __FUNCTION__);
+                    return -3;
+                }
+                g_config_context.config.server_cert_path = new_value;
+            }
             break;
         case OBS_CONFIG_CURL_LOG_VERBOSE:
             g_config_context.config.curl_log_verbose = (strcmp(value, "true") == 0 || atoi(value) != 0);
@@ -180,19 +208,40 @@ static int config_set_internal(obs_config_item_t item, const char *value, config
             if (g_config_context.config.client_cert_path) {
                 free(g_config_context.config.client_cert_path);
             }
-            g_config_context.config.client_cert_path = strdup(value);
+            {
+                char *new_value = strdup(value);
+                if (!new_value) {
+                    COMMLOG(OBS_LOGERROR, "%s Failed to duplicate client_cert_path value", __FUNCTION__);
+                    return -3;
+                }
+                g_config_context.config.client_cert_path = new_value;
+            }
             break;
         case OBS_CONFIG_CLIENT_KEY_PATH:
             if (g_config_context.config.client_key_path) {
                 free(g_config_context.config.client_key_path);
             }
-            g_config_context.config.client_key_path = strdup(value);
+            {
+                char *new_value = strdup(value);
+                if (!new_value) {
+                    COMMLOG(OBS_LOGERROR, "%s Failed to duplicate client_key_path value", __FUNCTION__);
+                    return -3;
+                }
+                g_config_context.config.client_key_path = new_value;
+            }
             break;
         case OBS_CONFIG_CLIENT_KEY_PASSWORD:
             if (g_config_context.config.client_key_password) {
                 free(g_config_context.config.client_key_password);
             }
-            g_config_context.config.client_key_password = strdup(value);
+            {
+                char *new_value = strdup(value);
+                if (!new_value) {
+                    COMMLOG(OBS_LOGERROR, "%s Failed to duplicate client_key_password value", __FUNCTION__);
+                    return -3;
+                }
+                g_config_context.config.client_key_password = new_value;
+            }
             break;
         #if OBS_ENABLE_GM_SUPPORT
         case OBS_CONFIG_GM_MODE_SWITCH:
@@ -222,7 +271,14 @@ static int config_set_internal(obs_config_item_t item, const char *value, config
             if (g_config_context.config.certificate_pin) {
                 free(g_config_context.config.certificate_pin);
             }
-            g_config_context.config.certificate_pin = strdup(value);
+            {
+                char *new_value = strdup(value);
+                if (!new_value) {
+                    COMMLOG(OBS_LOGERROR, "%s Failed to duplicate certificate_pin value", __FUNCTION__);
+                    return -3;
+                }
+                g_config_context.config.certificate_pin = new_value;
+            }
             break;
         case OBS_CONFIG_CERTIFICATE_PIN_COUNT:
             g_config_context.config.certificate_pin_count = atoi(value);
