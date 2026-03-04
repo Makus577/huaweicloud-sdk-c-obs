@@ -221,10 +221,16 @@ typedef enum
 	 OBS_STATUS_JSON_PARSE_ERROR,
 	 OBS_STATUS_JSON_CREATE_ERROR,
 	 OBS_STATUS_AccessLabelNotFound,
-	OBS_STATUS_NULL_HOSTNAME, 
+	OBS_STATUS_NULL_HOSTNAME,
 	OBS_STATUS_NULL_SECRETE_ACCESS_KEY,
 	OBS_STATUS_NoSuchTrashConfiguration,
 	OBS_STATUS_InvalidRequestBody,
+	/* GM (National Cryptography) specific errors */
+	OBS_STATUS_GM_ModeNotSupported,
+	OBS_STATUS_GM_CipherNotAvailable,
+	OBS_STATUS_GM_VersionNotSupported,
+	OBS_STATUS_GM_EncCertNotConfigured,
+	OBS_STATUS_GM_TongsuoNotAvailable,
     OBS_STATUS_BUTT
 } obs_status;
 
@@ -1096,27 +1102,139 @@ typedef enum
 	OBS_REPLACE_NEW                            =2
 }metadata_action_indicator;
 
+typedef enum
+{
+    OBS_MUTUAL_SSL_CLOSE = 0,
+    OBS_MUTUAL_SSL_OPEN = 1
+} obs_mutual_ssl_switch;
+
+// 国密功能编译开关（默认禁用）
+#ifndef OBS_ENABLE_GM_SUPPORT
+#define OBS_ENABLE_GM_SUPPORT 0
+#endif
+
+// 国密模式枚举（仅在OBS_ENABLE_GM_SUPPORT=1时有效）
+#if OBS_ENABLE_GM_SUPPORT
+typedef enum
+{
+    OBS_GM_MODE_CLOSE = 0,  // 非国密模式（标准TLS）
+    OBS_GM_MODE_OPEN = 1     // 国密模式（支持SM2/SM3/SM4）
+} obs_gm_mode_switch;
+#endif
+
+/**
+ * HTTP请求配置选项结构体
+ *
+ * 包含HTTP请求的所有配置选项，包括连接超时、代理设置、SSL配置等
+ * 用于配置OBS SDK的网络请求行为
+ */
 typedef struct obs_http_request_option
 {
-    int speed_limit;
-    int speed_time;
-    int connect_time;
-    int max_connected_time;
-    bool keep_alive;
-    int keep_idle;
-    int keep_intvl;
-    char *proxy_host;
-    char *proxy_auth;
-    char *ssl_cipher_list;
-    bool forbid_reuse_tcp;
-    long curl_max_connects;
-    obs_http2_switch http2_switch;
-    obs_bbr_switch   bbr_switch;
-	obs_auth_switch  auth_switch;
-    long buffer_size;
-    char* server_cert_path;
-	bool curl_log_verbose;
+    int speed_limit;                     // 速度限制（字节/秒）
+    int speed_time;                      // 速度测量时间间隔（秒）
+    int connect_time;                    // 连接超时时间（秒）
+    int max_connected_time;              // 最大连接时间（秒）
+    bool keep_alive;                     // 是否保持连接
+    int keep_idle;                       // TCP保持连接的空闲时间（秒）
+    int keep_intvl;                      // TCP保持连接的间隔时间（秒）
+    char *proxy_host;                    // 代理服务器地址
+    char *proxy_auth;                    // 代理服务器认证信息（格式：user:password）
+    char *ssl_cipher_list;               // SSL密码套件列表（格式："ECDHE-SM2-WITH-SM4-SM3:ECDHE-SM2-WITH-SM4-GCM-SM3"）
+    bool forbid_reuse_tcp;               // 是否禁止重用TCP连接
+    long curl_max_connects;              // CURL最大连接数
+    obs_http2_switch http2_switch;       // HTTP/2开关
+    obs_bbr_switch   bbr_switch;         // BBR算法开关
+	obs_auth_switch  auth_switch;        // 认证类型开关
+    long buffer_size;                    // 缓冲区大小（字节）
+    char* server_cert_path;              // 服务器证书路径（PEM格式）
+	bool curl_log_verbose;               // 是否启用详细的CURL日志
+
+    // 双向证书认证配置（所有场景支持）
+    obs_mutual_ssl_switch mutual_ssl_switch;  // 双向证书认证开关（OBS_MUTUAL_SSL_OPEN/OBS_MUTUAL_SSL_CLOSE）
+    char* client_cert_path;                  // 客户端证书路径（PEM格式）
+    char* client_key_path;                   // 客户端私钥路径（PEM格式）
+    char* client_key_password;               // 客户端私钥密码（可选，NULL表示无密码）
+                                             // 注意：密码使用OPENSSL_secure_malloc分配，需要使用OPENSSL_secure_free释放
+
+    // 国密相关配置（仅在OBS_ENABLE_GM_SUPPORT=1时有效）
+    #if OBS_ENABLE_GM_SUPPORT
+    obs_gm_mode_switch gm_mode_switch;         // 国密模式开关（OBS_GM_MODE_OPEN/OBS_GM_MODE_CLOSE）
+    char* client_enc_cert_path;               // 国密加密证书路径（PEM格式）- 国密双证书模式使用
+    char* client_enc_key_path;                // 国密加密私钥路径（PEM格式）- 国密双证书模式使用
+    #endif
 } obs_http_request_option;
+
+/**
+ * 初始化HTTP请求配置选项
+ *
+ * 初始化obs_http_request_option结构体，设置默认值
+ *
+ * @param options 指向obs_http_request_option结构体的指针
+ *
+ * 示例：
+ * obs_http_request_option request_options;
+ * init_http_request_option(&request_options);
+ *
+ * 配置双向认证示例（所有场景支持）：
+ * request_options.mutual_ssl_switch = OBS_MUTUAL_SSL_OPEN;
+ * request_options.client_cert_path = "/path/to/client.crt";
+ * request_options.client_key_path = "/path/to/client.key";
+ * request_options.client_key_password = "password";
+ *
+ * 配置国密模式示例（仅OBS_ENABLE_GM_SUPPORT=1时有效）：
+ * #if OBS_ENABLE_GM_SUPPORT
+ * request_options.gm_mode_switch = OBS_GM_MODE_OPEN;
+ * #endif
+ */
+void init_http_request_option(obs_http_request_option *options);
+
+/**
+ * @brief 安全地设置客户端私钥密码
+ *
+ * 使用OPENSSL_secure_malloc分配安全内存来存储密码，
+ * 并在不再需要时安全擦除内存内容。
+ *
+ * @param options 指向obs_http_request_option结构体的指针
+ * @param password 密码字符串（将被复制到安全内存），NULL或空字符串表示清除密码
+ * @return int 操作结果：0表示成功，-1表示失败
+ *
+ * @note 该函数会自动释放之前设置的密码（如果存在）
+ * @note 密码存储在安全内存中，不会被交换到磁盘
+ * @note 使用完成后应调用 clear_client_key_password_secure() 清除密码
+ *
+ * 示例：
+ * ```c
+ * obs_http_request_option options;
+ * init_http_request_option(&options);
+ *
+ * // 设置密码
+ * set_client_key_password_secure(&options, "my_password");
+ *
+ * // 使用options进行SSL连接...
+ *
+ * // 完成后清除密码
+ * clear_client_key_password_secure(&options);
+ * ```
+ */
+int set_client_key_password_secure(obs_http_request_option *options, const char *password);
+
+/**
+ * @brief 安全地清除客户端私钥密码
+ *
+ * 使用OPENSSL_secure_free释放密码内存，并自动擦除内存内容。
+ *
+ * @param options 指向obs_http_request_option结构体的指针
+ *
+ * @note 调用此函数后，options->client_key_password 将被设置为NULL
+ * @note 此函数会安全擦除内存内容，防止密码被内存扫描工具读取
+ *
+ * 示例：
+ * ```c
+ * // 在使用完密码后，应该立即清除
+ * clear_client_key_password_secure(&options);
+ * ```
+ */
+void clear_client_key_password_secure(obs_http_request_option *options);
 
 typedef struct temp_auth_configure
 {

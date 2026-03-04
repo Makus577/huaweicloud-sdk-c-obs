@@ -1,0 +1,1 @@
+/usr/bin/cc  -Wall -Werror -g CMakeFiles/ssl_config_test.dir/ssl_config_test.c.o -o ssl_config_test 

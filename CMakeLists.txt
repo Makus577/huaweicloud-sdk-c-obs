@@ -25,13 +25,31 @@ if(NOT CMAKE_HOST_WIN32)
 endif()
 
 option(USE_CUSTOM "option for custom library path" OFF)
+option(OBS_ENABLE_GM_SUPPORT "Enable GM algorithm support (auto-detect Tongsuo at runtime)" ON)
+
+if(OBS_ENABLE_GM_SUPPORT)
+    add_definitions(-DOBS_ENABLE_GM_SUPPORT=1)
+    message(STATUS "GM algorithm support: ENABLED (runtime auto-detection)")
+else()
+    add_definitions(-DOBS_ENABLE_GM_SUPPORT=0)
+    message(STATUS "GM algorithm support: DISABLED")
+endif()
 set(SECUREC_INC_DIR ${PROJECT_SOURCE_DIR}/platform/libboundscheck/include)
+# 注意：要实现完整的国密HTTPS支持，需要同时替换：
+# 1. OpenSSL -> Tongsuo (提供国密算法 SM2/SM3/SM4)
+# 2. curl -> 铜锁curl (支持 --tlcp 选项和双证书)
+#
+# 当前配置使用标准版本，如需国密支持请：
+# 1. 将 CURL_VERSION 改为 tongsuo-curl 版本
+# 2. 将 OPENSSL_VERSION 改为 tongsuo 版本
+# 3. 确保对应目录存在：build/script/Provider/build/${LINKARCH}/${版本}/
 set(CURL_VERSION curl-8.11.1)
-set(OPENSSL_VERSION openssl-1.1.1w)
+set(TONGSUO_VERSION tongsuo-8.3.0)
 set(LIBXML2_VERSION libxml2-2.9.9)
 set(PCRE_VERSION pcre-8.45)
 set(ICONV_VERSION iconv-1.15)
 set(CJSON_VERSION cjson-1.7.18)
+set(SPDLOG_VERSION spdlog-1.12.0)
 
 
 
@@ -53,8 +71,8 @@ execute_process(COMMAND uname -m OUTPUT_VARIABLE OARCH)
     if(NOT USE_CUSTOM)
         set(CURL_INC_DIR ${PROJECT_SOURCE_DIR}/build/script/Provider/build/${LINKARCH}/${CURL_VERSION}/include)
         set(CURL_LIB_DIR ${PROJECT_SOURCE_DIR}/build/script/Provider/build/${LINKARCH}/${CURL_VERSION}/lib)
-        set(OPENSSL_INC_DIR ${PROJECT_SOURCE_DIR}/build/script/Provider/build/${LINKARCH}/${OPENSSL_VERSION}/include)
-        set(OPENSSL_LIB_DIR ${PROJECT_SOURCE_DIR}/build/script/Provider/build/${LINKARCH}/${OPENSSL_VERSION}/lib)
+        set(OPENSSL_INC_DIR ${PROJECT_SOURCE_DIR}/build/script/Provider/build/${LINKARCH}/${TONGSUO_VERSION}/include)
+        set(OPENSSL_LIB_DIR ${PROJECT_SOURCE_DIR}/build/script/Provider/build/${LINKARCH}/${TONGSUO_VERSION}/lib)
         set(LIBXML2_INC_DIR ${PROJECT_SOURCE_DIR}/build/script/Provider/build/${LINKARCH}/${LIBXML2_VERSION}/include)
         set(LIBXML2_LIB_DIR ${PROJECT_SOURCE_DIR}/build/script/Provider/build/${LINKARCH}/${LIBXML2_VERSION}/lib)
         set(PCRE_INC_DIR ${PROJECT_SOURCE_DIR}/build/script/Provider/build/${LINKARCH}/${PCRE_VERSION}/include/pcre)
@@ -201,9 +219,13 @@ link_directories(${ESDK_LOG_LIB_DIR})
 link_directories(${SPDLOG_LIB_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/source/eSDK_OBS_API/eSDK_OBS_API_C++/inc)
 include_directories(${CMAKE_SOURCE_DIR}/source/eSDK_OBS_API/eSDK_OBS_API_C++/include)
+# 公共源文件
 aux_source_directory(${CMAKE_SOURCE_DIR}/source/eSDK_OBS_API/eSDK_OBS_API_C++/src SOURCE_DIR)
 aux_source_directory(${CMAKE_SOURCE_DIR}/source/eSDK_OBS_API/eSDK_OBS_API_C++/src/bucket BUCKET_SOURCE_DIR)
 aux_source_directory(${CMAKE_SOURCE_DIR}/source/eSDK_OBS_API/eSDK_OBS_API_C++/src/object OBJECT_SOURCE_DIR)
+
+# 添加库目标
+# 国密功能通过编译宏 OBS_ENABLE_GM_SUPPORT 控制，在 ssl_config.c 和 request.c 中通过条件编译实现
 add_library(eSDKOBS SHARED ${SOURCE_DIR} ${BUCKET_SOURCE_DIR} ${OBJECT_SOURCE_DIR})
 target_link_libraries(eSDKOBS curl ssl xml2 pcre iconv cjson boundscheck eSDKLogAPI spdlog)
 

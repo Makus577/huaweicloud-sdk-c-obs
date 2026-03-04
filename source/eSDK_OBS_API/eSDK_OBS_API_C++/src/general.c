@@ -1,11 +1,11 @@
 /*********************************************************************************
-* Copyright 2019 Huawei Technologies Co.,Ltd.
+* Copyrights 2019 Huawei Technologies Co.,Ltd.
 * Licensed under the Apache License, Version 2.0 (the "License"); you may not use
 * this file except in compliance with the License.  You may obtain a copy of the
 * License at
-* 
+*
 * http://www.apache.org/licenses/LICENSE-2.0
-* 
+*
 * Unless required by applicable law or agreed to in writing, software distributed
 * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
 * CONDITIONS OF ANY KIND, either express or implied.  See the License for the
@@ -15,13 +15,14 @@
 #include <ctype.h>
 #include <string.h>
 #include "request.h"
+#include "ssl_config.h"
 #include "simplexml.h"
 #include "util.h"
 #include "log.h"
 #include "securec.h"
 #include <libxml/parser.h>
 #include <curl/curl.h>
-#include <openssl/md5.h> 
+#include <openssl/md5.h>
 #include "common.h"
 
 #if defined __GNUC__ || defined LINUX
@@ -247,7 +248,21 @@ void init_obs_options(obs_options *options)
 	options->request_options.curl_log_verbose = false;
     options->request_options.forbid_reuse_tcp = false;
     options->request_options.curl_max_connects = DEFAULT_MAXCONNECTS;
-        
+
+    // === 双向认证配置 ===
+    options->request_options.mutual_ssl_switch = OBS_MUTUAL_SSL_CLOSE;
+    options->request_options.client_cert_path = NULL;
+    options->request_options.client_key_path = NULL;
+    options->request_options.client_key_password = NULL;
+
+#if OBS_ENABLE_GM_SUPPORT
+    // === 国密配置 ===
+    options->request_options.gm_mode_switch = OBS_GM_MODE_CLOSE;
+    options->request_options.client_enc_cert_path = NULL;
+    options->request_options.client_enc_key_path = NULL;
+#endif
+
+    // === bucket_options 配置 ===
     options->bucket_options.access_key = NULL;
     options->bucket_options.secret_access_key =NULL;
     options->bucket_options.bucket_name = NULL;

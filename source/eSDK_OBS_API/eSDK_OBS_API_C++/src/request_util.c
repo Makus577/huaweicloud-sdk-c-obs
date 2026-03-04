@@ -284,6 +284,7 @@ CURLcode sslctx_function(CURL *curl, const void *sslctx, void *parm)
 
 	if (!PEM_read_bio_X509(bio, &cert, 0, NULL))
 	{
+		COMMLOG(OBS_LOGERROR, "%s Failed to read PEM certificate", __FUNCTION__);
 		return CURLE_SSL_CACERT_BADFILE;
 	}
 
@@ -291,6 +292,7 @@ CURLcode sslctx_function(CURL *curl, const void *sslctx, void *parm)
     X509_STORE_add_cert(store, cert);
     X509_free(cert);
     BIO_free(bio);
+    COMMLOG(OBS_LOGDEBUG, "%s Server certificate added to trust store", __FUNCTION__);
     return CURLE_OK;
 }
 

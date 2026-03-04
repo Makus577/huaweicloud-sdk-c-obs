@@ -1,0 +1,5 @@
+/root/huaweicloud-sdk-c-obs/source/eSDK_OBS_API/eSDK_OBS_API_C++/test/build/CMakeFiles/ssl_config_test.dir
+/root/huaweicloud-sdk-c-obs/source/eSDK_OBS_API/eSDK_OBS_API_C++/test/build/CMakeFiles/ssl_integration_test.dir
+/root/huaweicloud-sdk-c-obs/source/eSDK_OBS_API/eSDK_OBS_API_C++/test/build/CMakeFiles/test.dir
+/root/huaweicloud-sdk-c-obs/source/eSDK_OBS_API/eSDK_OBS_API_C++/test/build/CMakeFiles/edit_cache.dir
+/root/huaweicloud-sdk-c-obs/source/eSDK_OBS_API/eSDK_OBS_API_C++/test/build/CMakeFiles/rebuild_cache.dir
