@@ -225,12 +225,22 @@ typedef enum
 	OBS_STATUS_NULL_SECRETE_ACCESS_KEY,
 	OBS_STATUS_NoSuchTrashConfiguration,
 	OBS_STATUS_InvalidRequestBody,
+
+	/* SSL/TLS specific errors - Granular error codes for mTLS configuration */
+	OBS_STATUS_SSL_CertNotFound,               /* Client certificate file not found or not readable */
+	OBS_STATUS_SSL_KeyNotFound,                /* Client private key file not found or not readable */
+	OBS_STATUS_SSL_CertInvalid,                /* Client certificate format error (not PEM) */
+	OBS_STATUS_SSL_KeyInvalid,                 /* Client private key format error (not PEM) */
+	OBS_STATUS_SSL_KeyPasswordInvalid,           /* Client private key password incorrect */
+	OBS_STATUS_SSL_CertKeyMismatch,              /* Client certificate and private key do not match */
+	OBS_STATUS_SSL_VersionNotSupported,          /* Unsupported SSL/TLS version */
+	OBS_STATUS_SSL_CipherNotSupported,           /* Unsupported cipher suite */
+	OBS_STATUS_SSL_CurlError,                    /* curl_easy_setopt failed for SSL option */
+
 	/* GM (National Cryptography) specific errors */
-	OBS_STATUS_GM_ModeNotSupported,
-	OBS_STATUS_GM_CipherNotAvailable,
 	OBS_STATUS_GM_VersionNotSupported,
-	OBS_STATUS_GM_EncCertNotConfigured,
-	OBS_STATUS_GM_TongsuoNotAvailable,
+	OBS_STATUS_GM_EncCertNotFound,
+	OBS_STATUS_GM_TongsuoNotSupported,
     OBS_STATUS_BUTT
 } obs_status;
 

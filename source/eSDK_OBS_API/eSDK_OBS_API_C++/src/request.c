@@ -469,17 +469,17 @@ obs_status setup_mtls(http_request *request,
         }
 
         // 设置签名证书 (标准CURLOPT选项)
-        curl_easy_setopt_safe(CURLOPT_SSLCERT, params->request_option.client_cert_path);
-        COMMLOG(OBS_LOGINFO, "%s Client certificate path: %s", __FUNCTION__, params->request_option.client_cert_path);
+        curl_easy_setopt_safe_ex(CURLOPT_SSLCERT, params->request_option.client_cert_path, OBS_STATUS_SSL_CertNotFound);
+        COMMLOG(OBS_LOGINFO, "%s Client certificate configured: %s", __FUNCTION__, params->request_option.client_cert_path);
 
         // 设置签名私钥
-        curl_easy_setopt_safe(CURLOPT_SSLKEY, params->request_option.client_key_path);
-        COMMLOG(OBS_LOGINFO, "%s Client key path: %s", __FUNCTION__, params->request_option.client_key_path);
+        curl_easy_setopt_safe_ex(CURLOPT_SSLKEY, params->request_option.client_key_path, OBS_STATUS_SSL_KeyNotFound);
+        COMMLOG(OBS_LOGINFO, "%s Client key configured: %s", __FUNCTION__, params->request_option.client_key_path);
 
         // 设置私钥密码
         if (params->request_option.client_key_password) {
-            curl_easy_setopt_safe(CURLOPT_KEYPASSWD, params->request_option.client_key_password);
-            COMMLOG(OBS_LOGINFO, "%s Client key password provided", __FUNCTION__);
+            curl_easy_setopt_safe_ex(CURLOPT_KEYPASSWD, params->request_option.client_key_password, OBS_STATUS_SSL_KeyPasswordInvalid);
+            COMMLOG(OBS_LOGINFO, "%s Client key password configured", __FUNCTION__);
         }
 
         // 国密双证书模式：设置加密证书
@@ -490,14 +490,14 @@ obs_status setup_mtls(http_request *request,
                 !params->request_option.client_enc_key_path) {
                 COMMLOG(OBS_LOGERROR, "%s GM mode requires explicit encryption certificate configuration. "
                     "Please set client_enc_cert_path and client_enc_key_path.", __FUNCTION__);
-                return OBS_STATUS_GM_EncCertNotConfigured;
+                return OBS_STATUS_GM_EncCertNotFound;
             }
 
             // 运行时自动检测 Tongsuo 支持
 #ifdef CURL_SSLVERSION_NTLSv1_1
                 // 使用 Tongsuo 扩展 API 设置加密证书
-            curl_easy_setopt_safe(CURLOPT_SSLENCCERT, params->request_option.client_enc_cert_path);
-            curl_easy_setopt_safe(CURLOPT_SSLENCKEY, params->request_option.client_enc_key_path);
+            curl_easy_setopt_safe_ex(CURLOPT_SSLENCCERT, params->request_option.client_enc_cert_path, OBS_STATUS_SSL_CertNotFound);
+            curl_easy_setopt_safe_ex(CURLOPT_SSLENCKEY, params->request_option.client_enc_key_path, OBS_STATUS_SSL_KeyNotFound);
 
             // 证书和密钥都设置成功
             COMMLOG(OBS_LOGINFO, "%s GM dual-certificate mode: encryption certificate and key set successfully", __FUNCTION__);
@@ -505,7 +505,7 @@ obs_status setup_mtls(http_request *request,
             // Tongsuo 不可用，返回具体错误
             COMMLOG(OBS_LOGERROR, "%s GM mode requires Tongsuo libcurl. "
                 "Please ensure libcurl is built with Tongsuo support.", __FUNCTION__);
-            return OBS_STATUS_GM_TongsuoNotAvailable;
+            return OBS_STATUS_GM_TongsuoNotSupported;
 #endif
         }
         COMMLOG(OBS_LOGINFO, "%s Mutual SSL authentication enabled", __FUNCTION__);
@@ -516,8 +516,8 @@ obs_status setup_mtls(http_request *request,
         COMMLOG(OBS_LOGINFO, "%s GM mode: configuring with Tongsuo standard options", __FUNCTION__);
 
         // 设置国密密码套件 (Tongsuo/OpenSSL格式)
-        curl_easy_setopt_safe(CURLOPT_SSL_CIPHER_LIST, params->request_option.ssl_cipher_list);
-        
+        curl_easy_setopt_safe_ex(CURLOPT_SSL_CIPHER_LIST, params->request_option.ssl_cipher_list, OBS_STATUS_SSL_CipherNotSupported);
+
 
         int ssl_version = params->request_option.ssl_version;
         if (ssl_version == 0) {

@@ -67,11 +67,44 @@
             }                                                                    \
         } while (0)
 
+/**
+ * @brief Standard curl option setter with error handling
+ *
+ * Sets a curl option and returns a generic initialization error on failure.
+ * Logs detailed error information including the option name, curl error code,
+ * and error description for debugging purposes.
+ *
+ * @param opt The CURLOPT_ option to set
+ * @param val The value to set for the option
+ */
 #define curl_easy_setopt_safe(opt, val)                                 \
                 if ((status = curl_easy_setopt                                      \
                      (request->curl, opt, val)) != CURLE_OK) {                      \
-                    COMMLOG(OBS_LOGWARN, "curl_easy_setopt_safe failed, curl_ret_code: %d", status);    \
-                    return OBS_STATUS_FailedToIInitializeRequest;                       \
+                    COMMLOG(OBS_LOGERROR, "[CURL ERROR] %s:%d %s - Failed to set %s, " \
+                            "curl_ret_code: %d, error: %s",                         \
+                            __FUNCTION__, __LINE__, __FILE__, #opt, status,         \
+                            curl_easy_strerror(status));                          \
+                    return OBS_STATUS_FailedToIInitializeRequest;                   \
+                }
+
+/**
+ * @brief Extended version of curl_easy_setopt_safe with custom error code
+ *
+ * This macro allows specifying a custom error code to return on failure,
+ * enabling granular error handling for different types of SSL configuration errors.
+ *
+ * @param opt The CURLOPT option to set
+ * @param val The value to set for the option
+ * @param error_status The obs_status error code to return on failure
+ */
+#define curl_easy_setopt_safe_ex(opt, val, error_status)                \
+                if ((status = curl_easy_setopt                                      \
+                     (request->curl, opt, val)) != CURLE_OK) {                      \
+                    COMMLOG(OBS_LOGERROR, "[CURL ERROR] %s:%d %s - Failed to set %s, " \
+                            "curl_ret_code: %d, error: %s, returning status: %d",  \
+                            __FUNCTION__, __LINE__, __FILE__, #opt, status,         \
+                            curl_easy_strerror(status), error_status);             \
+                    return error_status;                                              \
                 }
                 
 #define append_standard_header(fieldName)                               \
