@@ -1102,11 +1102,30 @@ typedef enum
 	OBS_REPLACE_NEW                            =2
 }metadata_action_indicator;
 
+/**
+ * @brief 客户端证书认证开关（用于服务器验证客户端身份）
+ *
+ * 控制是否发送客户端证书给服务器进行身份验证
+ * 注意：此选项仅控制客户端证书的发送，不是服务器证书验证
+ * 服务器证书验证由 server_cert_path 字段控制
+ */
 typedef enum
 {
-    OBS_MUTUAL_SSL_CLOSE = 0,
-    OBS_MUTUAL_SSL_OPEN = 1
-} obs_mutual_ssl_switch;
+    OBS_CLIENT_AUTH_CLOSE = 0,   // 不发送客户端证书（单向认证，仅验证服务器）
+    OBS_CLIENT_AUTH_OPEN = 1    // 发送客户端证书（双向认证，服务器也验证客户端）
+} obs_client_auth_switch;
+
+/**
+ * @brief SSL/TLS主机名验证模式
+ *
+ * 控制SSL/TLS连接时如何验证服务器证书的主机名/域名
+ * 对应libcurl的CURLOPT_SSL_VERIFYHOST选项
+ */
+typedef enum
+{
+    OBS_SSL_VERIFYHOST_NONE = 0,       // 不验证主机名（不安全，仅测试使用）
+    OBS_SSL_VERIFYHOST_HOSTNAME = 2    // 验证证书中的主机名与请求的主机名是否匹配（推荐）
+} obs_ssl_verifyhost_mode;
 
 // 国密功能编译开关（默认禁用）
 #ifndef OBS_ENABLE_GM_SUPPORT
@@ -1140,6 +1159,8 @@ typedef struct obs_http_request_option
     char *proxy_host;                    // 代理服务器地址
     char *proxy_auth;                    // 代理服务器认证信息（格式：user:password）
     char *ssl_cipher_list;               // SSL密码套件列表（格式："ECDHE-SM2-WITH-SM4-SM3:ECDHE-SM2-WITH-SM4-GCM-SM3"）
+    obs_ssl_verifyhost_mode ssl_verifyhost; // SSL主机名验证模式（OBS_SSL_VERIFYHOST_NONE=不验证，OBS_SSL_VERIFYHOST_HOSTNAME=验证主机名）
+    int ssl_version;                     // SSL/TLS版本（6=TLSv1.2, 11=NTLSv1.1国密, 12=NTLSv1.2国密，对应CURLOPT_SSLVERSION）
     bool forbid_reuse_tcp;               // 是否禁止重用TCP连接
     long curl_max_connects;              // CURL最大连接数
     obs_http2_switch http2_switch;       // HTTP/2开关
@@ -1149,12 +1170,20 @@ typedef struct obs_http_request_option
     char* server_cert_path;              // 服务器证书路径（PEM格式）
 	bool curl_log_verbose;               // 是否启用详细的CURL日志
 
-    // 双向证书认证配置（所有场景支持）
-    obs_mutual_ssl_switch mutual_ssl_switch;  // 双向证书认证开关（OBS_MUTUAL_SSL_OPEN/OBS_MUTUAL_SSL_CLOSE）
-    char* client_cert_path;                  // 客户端证书路径（PEM格式）
-    char* client_key_path;                   // 客户端私钥路径（PEM格式）
+    // 客户端证书认证配置（用于服务器验证客户端身份，即双向认证）
+    obs_client_auth_switch client_auth_switch;  // 客户端证书认证开关（OBS_CLIENT_AUTH_OPEN=启用客户端证书，OBS_CLIENT_AUTH_CLOSE=关闭）
+                                                 // 设置为OBS_CLIENT_AUTH_OPEN时，SDK会发送客户端证书给服务器进行身份验证
+                                                 // 注意：服务器证书验证由server_cert_path字段控制
+
+    // 双向证书认证配置（客户端证书认证，用于服务端验证客户端身份）
+    char* client_cert_path;                  // 客户端证书路径（PEM格式），用于双向认证场景
+    char* client_key_path;                   // 客户端私钥路径（PEM格式），用于双向认证场景
     char* client_key_password;               // 客户端私钥密码（可选，NULL表示无密码）
-                                             // 注意：密码使用OPENSSL_secure_malloc分配，需要使用OPENSSL_secure_free释放
+                                             // 安全使用方式：
+                                             // 1. 推荐使用set_client_key_password_secure()函数设置密码
+                                             // 2. 密码使用OPENSSL_secure_malloc分配，不会被交换到磁盘
+                                             // 3. 使用完成后调用clear_client_key_password_secure()清除密码
+                                             // 4. 不要直接设置此字段，除非您了解安全风险
 
     // 国密相关配置（仅在OBS_ENABLE_GM_SUPPORT=1时有效）
     #if OBS_ENABLE_GM_SUPPORT
@@ -1175,11 +1204,17 @@ typedef struct obs_http_request_option
  * obs_http_request_option request_options;
  * init_http_request_option(&request_options);
  *
- * 配置双向认证示例（所有场景支持）：
- * request_options.mutual_ssl_switch = OBS_MUTUAL_SSL_OPEN;
+ * 配置客户端证书认证（双向认证，服务器验证客户端身份）：
+ * request_options.client_auth_switch = OBS_CLIENT_AUTH_OPEN;
  * request_options.client_cert_path = "/path/to/client.crt";
  * request_options.client_key_path = "/path/to/client.key";
- * request_options.client_key_password = "password";
+ * // 安全设置密码（推荐使用set_client_key_password_secure函数）
+ * set_client_key_password_secure(&request_options, "password");
+ * // 使用完成后清除密码
+ * clear_client_key_password_secure(&request_options);
+ *
+ * 配置服务器证书验证（验证OBS服务器证书）：
+ * request_options.server_cert_path = "/path/to/ca.crt";  // 指定自定义CA证书验证服务器
  *
  * 配置国密模式示例（仅OBS_ENABLE_GM_SUPPORT=1时有效）：
  * #if OBS_ENABLE_GM_SUPPORT

@@ -250,7 +250,7 @@ void init_obs_options(obs_options *options)
     options->request_options.curl_max_connects = DEFAULT_MAXCONNECTS;
 
     // === 双向认证配置 ===
-    options->request_options.mutual_ssl_switch = OBS_MUTUAL_SSL_CLOSE;
+    options->request_options.obs_client_auth_switch = OBS_CLIENT_AUTH_CLOSE;
     options->request_options.client_cert_path = NULL;
     options->request_options.client_key_path = NULL;
     options->request_options.client_key_password = NULL;

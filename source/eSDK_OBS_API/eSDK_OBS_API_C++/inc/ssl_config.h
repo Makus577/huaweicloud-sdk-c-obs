@@ -34,28 +34,6 @@ extern "C" {
 #endif
 
 /**
- * @brief 验证SSL配置的有效性
- *
- * 验证SSL配置的有效性，检查配置是否符合要求。
- *
- * @param config 指向obs_http_request_option结构体的指针，包含要验证的配置
- *
- * @return int 验证结果：
- *         0 - 配置有效
- *        -1 - 配置为NULL
- *        -2 - 双向认证已启用但未指定客户端证书路径
- *        -3 - 双向认证已启用但未指定客户端私钥路径
- *        -4 - 客户端证书文件不存在或不可读
- *        -5 - 客户端私钥文件不存在或不可读
- *        -6 - 服务器证书路径无效
- *        -7 - 客户端证书文件格式无效（非PEM格式）
- *        -8 - 客户端私钥文件格式无效（非PEM格式）
- *        -9 - 客户端证书和私钥不匹配
- *        -10 - 客户端私钥密码不正确
- */
-int validate_ssl_config(const obs_http_request_option *config);
-
-/**
  * @brief 安全地设置客户端私钥密码
  *
  * 使用OPENSSL_secure_malloc分配安全内存来存储密码，
