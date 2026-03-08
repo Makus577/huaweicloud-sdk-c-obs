@@ -15,7 +15,7 @@
 #include <ctype.h>
 #include <string.h>
 #include "request.h"
-#include "ssl_config.h"
+#include "ssl_password_callback.h"
 #include "simplexml.h"
 #include "util.h"
 #include "log.h"

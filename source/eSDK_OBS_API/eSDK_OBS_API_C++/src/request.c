@@ -476,10 +476,12 @@ obs_status setup_mtls(http_request *request,
         curl_easy_setopt_safe_ex(CURLOPT_SSLKEY, params->request_option.client_key_path, OBS_STATUS_SSL_KeyNotFound);
         COMMLOG(OBS_LOGINFO, "%s Client key configured: %s", __FUNCTION__, params->request_option.client_key_path);
 
-        // 设置私钥密码
-        if (params->request_option.client_key_password) {
-            curl_easy_setopt_safe_ex(CURLOPT_KEYPASSWD, params->request_option.client_key_password, OBS_STATUS_SSL_KeyPasswordInvalid);
-            COMMLOG(OBS_LOGINFO, "%s Client key password configured", __FUNCTION__);
+        // 设置私钥密码（延迟获取方案）
+        if (params->request_option.password_callback) {
+            // 使用 SSL_CTX_FUNCTION 回调实现延迟获取
+            curl_easy_setopt_safe(CURLOPT_SSL_CTX_FUNCTION, ssl_password_callback);
+            curl_easy_setopt_safe(CURLOPT_SSL_CTX_DATA, &params->request_option);
+            COMMLOG(OBS_LOGINFO, "%s Client key password callback configured (lazy loading)", __FUNCTION__);
         }
 
         // 国密双证书模式：设置加密证书

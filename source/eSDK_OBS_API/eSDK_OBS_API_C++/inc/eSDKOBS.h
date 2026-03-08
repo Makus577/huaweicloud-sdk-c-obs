@@ -1188,12 +1188,37 @@ typedef struct obs_http_request_option
     // 双向证书认证配置（客户端证书认证，用于服务端验证客户端身份）
     char* client_cert_path;                  // 客户端证书路径（PEM格式），用于双向认证场景
     char* client_key_path;                   // 客户端私钥路径（PEM格式），用于双向认证场景
-    char* client_key_password;               // 客户端私钥密码（可选，NULL表示无密码）
-                                             // 安全使用方式：
-                                             // 1. 推荐使用set_client_key_password_secure()函数设置密码
-                                             // 2. 密码使用OPENSSL_secure_malloc分配，不会被交换到磁盘
-                                             // 3. 使用完成后调用clear_client_key_password_secure()清除密码
-                                             // 4. 不要直接设置此字段，除非您了解安全风险
+    // 注意：以下字段已移除，改用延迟获取机制
+    // char* client_key_password;              // [已移除] 请使用 password_callback
+
+    /**
+     * @brief 密码获取回调函数
+     *
+     * 用于延迟获取 SSL 私钥密码。设置此回调后，SDK 在 SSL 握手时
+     * 才会调用此函数获取密码，而不是提前存储密码。
+     *
+     * @param context 用户上下文
+     * @param password_buffer 密码输出缓冲区（调用者分配）
+     * @param buffer_size 缓冲区大小
+     * @return 成功返回0，失败返回-1
+     *
+     * 示例：
+     * @code
+     * int my_password_callback(void *context, char *buffer, size_t size) {
+     *     // 从安全存储获取密码
+     *     const char *pwd = get_password_from_keyring();
+     *     if (!pwd) return -1;
+     *     strncpy(buffer, pwd, size - 1);
+     *     buffer[size - 1] = '\0';
+     *     return 0;
+     * }
+     *
+     * options.password_callback = my_password_callback;
+     * options.password_callback_context = NULL;
+     * @endcode
+     */
+    int (*password_callback)(void *context, char *password_buffer, size_t buffer_size);
+    void *password_callback_context;         // 密码回调的用户上下文
 
     // 国密相关配置（仅在OBS_ENABLE_GM_SUPPORT=1时有效）
     #if OBS_ENABLE_GM_SUPPORT
