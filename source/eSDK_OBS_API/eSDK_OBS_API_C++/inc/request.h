@@ -87,25 +87,29 @@
                     return OBS_STATUS_FailedToIInitializeRequest;                   \
                 }
 
-/**
- * @brief Extended version of curl_easy_setopt_safe with custom error code
- *
- * This macro allows specifying a custom error code to return on failure,
- * enabling granular error handling for different types of SSL configuration errors.
- *
- * @param opt The CURLOPT option to set
- * @param val The value to set for the option
- * @param error_status The obs_status error code to return on failure
- */
-#define curl_easy_setopt_safe_ex(opt, val, error_status)                \
-                if ((status = curl_easy_setopt                                      \
-                     (request->curl, opt, val)) != CURLE_OK) {                      \
-                    COMMLOG(OBS_LOGERROR, "[CURL ERROR] %s:%d %s - Failed to set %s, " \
-                            "curl_ret_code: %d, error: %s, returning status: %d",  \
-                            __FUNCTION__, __LINE__, __FILE__, #opt, status,         \
-                            curl_easy_strerror(status), error_status);             \
-                    return error_status;                                              \
-                }
+/* OBS CURL options safe setting APIs */
+#define OBS_CURL_SETOPT_DEFAULT_ERROR OBS_STATUS_FailedToIInitializeRequest
+
+#define __OBS_CURL_SET_IMPL(curl, opt, val, error_status)                \
+    ({                                                                   \
+        CURLcode _curl_status = curl_easy_setopt((curl), (opt), (val));  \
+        obs_status _result = OBS_STATUS_OK;                              \
+        if (_curl_status != CURLE_OK) {                                  \
+            COMMLOG(OBS_LOGERROR, "[CURL ERROR] %s:%d %s - Failed to set %s, " \
+                    "curl_ret_code: %d, error: %s, returning status: %d", \
+                    __func__, __LINE__, __FILE__, #opt, _curl_status,    \
+                    curl_easy_strerror(_curl_status), (error_status));   \
+            _result = (error_status);                                    \
+        }                                                                \
+        _result;                                                         \
+    })
+
+/* 辅助宏：确保返回状态码 */
+#define OBS_CURL_SETOPT(curl, opt, val) \
+    __OBS_CURL_SET_IMPL((curl), (opt), (val), OBS_CURL_SETOPT_DEFAULT_ERROR)
+
+#define OBS_CURL_SETOPT_WITH_STATUS(curl, opt, val, error_status) \
+    __OBS_CURL_SET_IMPL((curl), (opt), (val), (error_status))
                 
 #define append_standard_header(fieldName)                               \
                     if (values-> fieldName [0]) {                                       \
