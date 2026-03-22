@@ -1361,7 +1361,12 @@ void startUploadThreads_win32(upload_file_proc_data * uploadFileProcDataList,
 
     for (i = 0; i < partCount; i++) {
         while (1) {
-            if(*(uploadFileProcDataList[i].stUploadParams->pause_upload_flag) == 1) {
+            int pause_flag_value = 0;
+            EnterCriticalSection(&g_csThreadCheckpoint);
+            pause_flag_value = *(uploadFileProcDataList[i].stUploadParams->pause_upload_flag);
+            LeaveCriticalSection(&g_csThreadCheckpoint);
+
+            if(pause_flag_value == 1) {
                 if(arrEvent[i] != NULL){
                     SetEvent(arrEvent[i]);
                 } else{
@@ -1454,7 +1459,12 @@ void startUpload_pthreads(upload_params * pstUploadParams, int partCount, void* 
 
     for (i = 0; i < partCount; i++) {
         while (1) {
-            if(*(pstUploadParams->pause_upload_flag) == 1) {
+            int pause_flag_value = 0;
+            pthread_mutex_lock(&g_mutexThreadCheckpoint);
+            pause_flag_value = *(pstUploadParams->pause_upload_flag);
+            pthread_mutex_unlock(&g_mutexThreadCheckpoint);
+
+            if (pause_flag_value == 1) {
                 pthread_mutex_lock(&g_mutexThreadCheckpoint);
                 err = pthread_cancel(arrThread[i]);
                 pthread_mutex_unlock(&g_mutexThreadCheckpoint);
@@ -1960,7 +1970,25 @@ void pause_upload_file(int *pause_flag)
 {
     COMMLOG(OBS_LOGINFO, "Enter pause_upload_file successfully ! pause_flag = %d",
         *pause_flag);
+
+#if defined WIN32
+    EnterCriticalSection(&g_csThreadCheckpoint);
+#endif
+
+#if defined __GNUC__ || defined LINUX
+    pthread_mutex_lock(&g_mutexThreadCheckpoint);
+#endif
+
     *pause_flag = 1;
+
+#if defined WIN32
+    LeaveCriticalSection(&g_csThreadCheckpoint);
+#endif
+
+#if defined __GNUC__ || defined LINUX
+    pthread_mutex_unlock(&g_mutexThreadCheckpoint);
+#endif
+
     COMMLOG(OBS_LOGINFO, "pause_flag is change to %d", *pause_flag);
 }
 
@@ -1977,9 +2005,28 @@ void upload_file(const obs_options *options, char *key, server_side_encryption_p
     obs_upload_file_configuration *upload_file_config, obs_upload_file_server_callback server_callback,
     obs_upload_file_response_handler *handler, void *callback_data)
 {
-    if (*(upload_file_config->pause_upload_flag) == 1) {
-		COMMLOG(OBS_LOGWARN, "*pause_upload_flag is %d",
-			(*(upload_file_config->pause_upload_flag)));
+    int pause_flag_value = 0;
+
+#if defined WIN32
+    EnterCriticalSection(&g_csThreadCheckpoint);
+#endif
+
+#if defined __GNUC__ || defined LINUX
+    pthread_mutex_lock(&g_mutexThreadCheckpoint);
+#endif
+
+    pause_flag_value = *(upload_file_config->pause_upload_flag);
+
+#if defined WIN32
+    LeaveCriticalSection(&g_csThreadCheckpoint);
+#endif
+
+#if defined __GNUC__ || defined LINUX
+    pthread_mutex_unlock(&g_mutexThreadCheckpoint);
+#endif
+
+    if (pause_flag_value == 1) {
+		COMMLOG(OBS_LOGWARN, "*pause_upload_flag is %d", pause_flag_value);
 	}
     int isFirstTime = 1;
     int retVal = -1;
@@ -2141,7 +2188,27 @@ void upload_file(const obs_options *options, char *key, server_side_encryption_p
         (void)GetUploadPartListToProcess(&pstUploadPartListDone, &pstUploadPartListNotDone,
             partCountToProc, &partCountToProc, upload_file_config->task_num);
 
-        if (*(upload_file_config->pause_upload_flag) == 1) {
+        int pause_flag_value = 0;
+
+#if defined WIN32
+    EnterCriticalSection(&g_csThreadCheckpoint);
+#endif
+
+#if defined __GNUC__ || defined LINUX
+    pthread_mutex_lock(&g_mutexThreadCheckpoint);
+#endif
+
+        pause_flag_value = *(upload_file_config->pause_upload_flag);
+
+#if defined WIN32
+    LeaveCriticalSection(&g_csThreadCheckpoint);
+#endif
+
+#if defined __GNUC__ || defined LINUX
+    pthread_mutex_unlock(&g_mutexThreadCheckpoint);
+#endif
+
+        if (pause_flag_value == 1) {
             COMMLOG(OBS_LOGERROR, "pstUploadPartListNotDone:%p is aborted by user!", pstUploadPartListNotDone);
             if (stUploadParams.response_handler->complete_callback) {
                 (stUploadParams.response_handler->complete_callback)(OBS_STATUS_AbortedByCallback, 0, callback_data);
