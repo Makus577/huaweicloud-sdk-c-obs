@@ -820,7 +820,7 @@ void LOG_EXIT(void)
     return ;
 }
 void print_current_time_ms(char* buffer, int bufferLen) {
-	// bufferÊÇ24¸ö×Ö·ûµÄÊ±¼ä×Ö·û´®£¬°üº¬ºÁÃë
+	// bufferï¿½ï¿½24ï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 #ifdef _WIN32
 	SYSTEMTIME st;

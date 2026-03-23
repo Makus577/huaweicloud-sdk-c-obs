@@ -490,11 +490,73 @@ obs_status setup_CheckCA(http_request *request,
     return OBS_STATUS_OK;
 }
 
+static obs_status validate_bind_request_options(const obs_http_request_option *request_options)
+{
+    if (request_options->outgoing_interface != NULL && request_options->outgoing_interface[0] == '\0') {
+        COMMLOG(OBS_LOGERROR, "Invalid parameter: outgoing_interface is empty string");
+        return OBS_STATUS_InvalidParameter;
+    }
+    if (request_options->local_port < 0 || request_options->local_port > 65535) {
+        COMMLOG(OBS_LOGERROR, "Invalid parameter: local_port %ld is out of range [0, 65535]", request_options->local_port);
+        return OBS_STATUS_InvalidParameter;
+    }
+    if (request_options->local_port == 0 && request_options->local_port_range != 1) {
+        COMMLOG(OBS_LOGERROR, "Invalid parameter: local_port is 0 but local_port_range is %ld, expected 1",
+            request_options->local_port_range);
+        return OBS_STATUS_InvalidParameter;
+    }
+    if (request_options->local_port > 0) {
+        if (request_options->local_port_range < 1 || request_options->local_port_range > 65535) {
+            COMMLOG(OBS_LOGERROR, "Invalid parameter: local_port_range %ld is out of range [1, 65535]",
+                request_options->local_port_range);
+            return OBS_STATUS_InvalidParameter;
+        }
+        if (request_options->local_port + request_options->local_port_range - 1 > 65535) {
+            COMMLOG(OBS_LOGERROR, "Invalid parameter: local_port %ld + local_port_range %ld - 1 exceeds 65535",
+                request_options->local_port, request_options->local_port_range);
+            return OBS_STATUS_InvalidParameter;
+        }
+    }
+    return OBS_STATUS_OK;
+}
+
+static obs_status apply_bind_request_options(CURL *curl, const obs_http_request_option *request_options)
+{
+    if (request_options->outgoing_interface != NULL) {
+        if (curl_easy_setopt(curl, CURLOPT_INTERFACE, request_options->outgoing_interface) != CURLE_OK) {
+            COMMLOG(OBS_LOGERROR, "curl_easy_setopt CURLOPT_INTERFACE failed, outgoing_interface: %s",
+                request_options->outgoing_interface);
+            return OBS_STATUS_FailedToIInitializeRequest;
+        }
+    }
+    if (request_options->local_port > 0) {
+        if (curl_easy_setopt(curl, CURLOPT_LOCALPORT, request_options->local_port) != CURLE_OK) {
+            COMMLOG(OBS_LOGERROR, "curl_easy_setopt CURLOPT_LOCALPORT failed, local_port: %ld",
+                request_options->local_port);
+            return OBS_STATUS_FailedToIInitializeRequest;
+        }
+        if (curl_easy_setopt(curl, CURLOPT_LOCALPORTRANGE, request_options->local_port_range) != CURLE_OK) {
+            COMMLOG(OBS_LOGERROR, "curl_easy_setopt CURLOPT_LOCALPORTRANGE failed, local_port_range: %ld",
+                request_options->local_port_range);
+            return OBS_STATUS_FailedToIInitializeRequest;
+        }
+    }
+    return OBS_STATUS_OK;
+}
+
 static obs_status setup_curl(http_request *request,
                            const request_params *params,
                            const request_computed_values *values)
 {
     CURLcode status = CURLE_OK;
+
+    if ((status = validate_bind_request_options(&params->request_option)) != OBS_STATUS_OK) {
+        return status;
+    }
+    if ((status = apply_bind_request_options(request->curl, &params->request_option)) != OBS_STATUS_OK) {
+        return status;
+    }
+
     curl_easy_setopt_safe(CURLOPT_PRIVATE, request);
     curl_easy_setopt_safe(CURLOPT_HEADERDATA, request);
     curl_easy_setopt_safe(CURLOPT_HEADERFUNCTION, &curl_header_func);
@@ -1461,6 +1523,20 @@ obs_status get_api_version(char *bucket_name,char *host_name,obs_protocol protoc
         CHECK_NULL_FREE(errorBuffer);
         return statu;
     }
+
+    if ((statu = validate_bind_request_options(request_options)) != OBS_STATUS_OK) {
+        curl_easy_cleanup(curl);
+        CHECK_NULL_FREE(uri);
+        CHECK_NULL_FREE(errorBuffer);
+        return statu;
+    }
+    if ((statu = apply_bind_request_options(curl, request_options)) != OBS_STATUS_OK) {
+        curl_easy_cleanup(curl);
+        CHECK_NULL_FREE(uri);
+        CHECK_NULL_FREE(errorBuffer);
+        return statu;
+    }
+
     if (protocol == OBS_PROTOCOL_HTTPS) {
         easy_setopt_safe(CURLOPT_SSL_VERIFYPEER, 0);
         easy_setopt_safe(CURLOPT_SSL_VERIFYHOST, 0);

@@ -133,6 +133,77 @@ void create_and_write_file(char *filename, unsigned int file_size)
 }
 
 
+/*
+ * Examples for binding local source address/port for OBS requests.
+ * These options control the LOCAL source address/port, not the destination OBS service port.
+ */
+
+/* Example 1: Bind to a specific local network interface (NIC name or IP address) */
+void example_bind_outgoing_interface(obs_options *option, const char *interface_name)
+{
+    /*
+     * Bind the request to use a specific local network interface.
+     * This is useful when the machine has multiple NICs and you want to
+     * force requests through a specific one.
+     *
+     * interface_name can be:
+     *   - NIC name: "eth0", "en0", "wlan0", etc.
+     *   - IP address: "192.168.1.100", "10.0.0.5", etc.
+     */
+    init_obs_options(option);
+    option->request_options.outgoing_interface = (char*)interface_name;
+    /* Note: local_port and local_port_range remain at default values (0 and 1) */
+}
+
+/* Example 2: Bind to a specific local source port (single port) */
+void example_bind_single_port(obs_options *option, long port)
+{
+    /*
+     * Bind the request to use a specific local source port.
+     * This is useful when you need to whitelist the source port on a firewall
+     * or when you want consistent port usage for connection tracking.
+     *
+     * port: local source port number (1-65535), 0 means no binding (default)
+     * local_port_range: 1 means only the specified port will be used
+     */
+    init_obs_options(option);
+    option->request_options.local_port = port;
+    option->request_options.local_port_range = 1;
+}
+
+/* Example 3: Bind to a local source port range */
+void example_bind_port_range(obs_options *option, long start_port, long range)
+{
+    /*
+     * Bind the request to use a local source port from a range.
+     * libcurl will try ports from start_port to start_port + range - 1.
+     * This is useful when you need to use multiple ports for connection pooling
+     * or when the target firewall expects a port range.
+     *
+     * start_port: first port in the range (1-65535)
+     * range: number of ports to try (1-65535)
+     * Note: start_port + range - 1 must not exceed 65535
+     */
+    init_obs_options(option);
+    option->request_options.local_port = start_port;
+    option->request_options.local_port_range = range;
+}
+
+/* Example 4: Bind both interface and port range together */
+void example_bind_interface_and_port_range(obs_options *option, const char *interface_name, long start_port, long range)
+{
+    /*
+     * Combine outgoing interface binding with port range binding.
+     * This is useful when you have multiple NICs and need to bind both
+     * the source address and port for firewall whitelist purposes.
+     */
+    init_obs_options(option);
+    option->request_options.outgoing_interface = (char*)interface_name;
+    option->request_options.local_port = start_port;
+    option->request_options.local_port_range = range;
+}
+
+
 obs_status response_properties_callback(const obs_response_properties *properties, void *callback_data)
 {
 

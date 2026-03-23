@@ -247,7 +247,10 @@ void init_obs_options(obs_options *options)
 	options->request_options.curl_log_verbose = false;
     options->request_options.forbid_reuse_tcp = false;
     options->request_options.curl_max_connects = DEFAULT_MAXCONNECTS;
-        
+    options->request_options.outgoing_interface = NULL;
+    options->request_options.local_port = 0;
+    options->request_options.local_port_range = 1;
+
     options->bucket_options.access_key = NULL;
     options->bucket_options.secret_access_key =NULL;
     options->bucket_options.bucket_name = NULL;

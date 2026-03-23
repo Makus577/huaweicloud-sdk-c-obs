@@ -531,6 +531,7 @@ obs_status request_curl_code_to_status(CURLcode code) {
     case CURLE_COULDNT_RESOLVE_HOST:
         return OBS_STATUS_NameLookupError;
     case CURLE_COULDNT_CONNECT:
+    case CURLE_INTERFACE_FAILED:
         return OBS_STATUS_FailedToConnect;
     case CURLE_WRITE_ERROR:
     case CURLE_OPERATION_TIMEDOUT:

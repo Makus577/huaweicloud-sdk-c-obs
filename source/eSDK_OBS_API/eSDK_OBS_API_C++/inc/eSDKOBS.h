@@ -1116,6 +1116,9 @@ typedef struct obs_http_request_option
     long buffer_size;
     char* server_cert_path;
 	bool curl_log_verbose;
+    char *outgoing_interface;    // local outgoing interface (network card name or IP address)
+    long local_port;            // local source port (0 means no binding)
+    long local_port_range;      // port range (1 means single port)
 } obs_http_request_option;
 
 typedef struct temp_auth_configure
