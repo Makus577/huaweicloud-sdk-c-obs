@@ -186,7 +186,7 @@ obs_status request_api_initialize(unsigned int flags)
     }
     use_api_index = -1;
     int ret = snprintf_s(userAgentG, sizeof(userAgentG),_TRUNCATE,
-    "%s%s%s.%s",PRODUCT, "/",LIBOBS_VER_MAJOR, LIBOBS_VER_MINOR);
+    "%s/%s",PRODUCT, OBS_SDK_VERSION);
     CheckAndLogNeg(ret, "snprintf_s", __FUNCTION__, __LINE__);
 
     return OBS_STATUS_OK;
@@ -875,9 +875,7 @@ static obs_status compose_auth_header(const request_params *params,
         CheckAndLogNeg(ret, "snprintf_s", __FUNCTION__, __LINE__);
     }
 
-    char * userAgent = USER_AGENT_VALUE;
-    int strLen = (int)(strlen(userAgent));
-    int ret = snprintf_s(values->userAgent, sizeof(values->userAgent),_TRUNCATE,"User-Agent: %.*s", strLen, userAgent);
+    int ret = snprintf_s(values->userAgent, sizeof(values->userAgent),_TRUNCATE,"User-Agent: %s", OBS_SDK_VERSION);
     CheckAndLogNeg(ret, "snprintf_s", __FUNCTION__, __LINE__);
 
     return OBS_STATUS_OK;

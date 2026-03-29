@@ -23,12 +23,9 @@
 #include "common.h"
 #include "cJSON.h"
 
-#ifdef WIN32
-#define LIBOBS_VER_MAJOR "3.24"
-#define LIBOBS_VER_MINOR "12"
-#endif
-
-#if defined __GNUC__ || defined LINUX
+// 提供默认值作为 fallback，确保跨平台兼容
+#ifndef OBS_SDK_VERSION
+#define OBS_SDK_VERSION "3.24.12"
 #endif
 
 #define HEAD_NORMAL_LEN 128
@@ -37,9 +34,6 @@
 #define BUCKET_LEN 65
 #define DOMAIN_LEN 254
 #define HEAD_CALLBACK_LEN 8192
-
-#define OBS_SDK_VERSION "3.24.12"
-#define USER_AGENT_VALUE  "obs-sdk-c-3.24.12";
 
 #define DEFAULT_LOW_SPEED_LIMIT    (1)
 #define DEFAULT_LOW_SPEED_TIME_S   (300)
